@@ -1,0 +1,655 @@
+{
+  "name": "Clinic Email Intake Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "is:unread"
+        }
+      },
+      "id": "patient-email-trigger",
+      "name": "Patient Email Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        380
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json;\n\nlet body = '';\nif (item.html) {\n  body = item.html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n} else {\n  body = (item.text || item.snippet || '').replace(/\\r\\n/g, '\\n');\n}\n\n// strip quoted replies / signatures (best effort)\nbody = body.split(/On .+ wrote:/)[0];\nbody = body.split(/-----Original Message-----/)[0];\nbody = body.split(/\\n--\\s*\\n/)[0];\nbody = body.trim();\n\nreturn [{\n  json: {\n    from: item.from || item['From'] || '',\n    subject: item.subject || item['Subject'] || '(no subject)',\n    cleanBody: body || '(empty message)',\n    messageId: item.id || item.messageId || '',\n    threadId: item.threadId || ''\n  }\n}];"
+      },
+      "id": "clean-email",
+      "name": "Clean Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/chat",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"llama3.1\",\n  stream: false,\n  format: \"json\",\n  messages: [\n    { role: \"system\", content: \"You are an intake assistant for a medical clinic. Read the patient email and return ONLY a valid JSON object with keys: patient_name, intent (one of: Appointment Booking, Appointment Cancellation, Appointment Reschedule, Insurance Question, Prescription Refill, Medical Records, Lab Results, General Question, Billing Question, Emergency), doctor, date, time, insurance, urgency (Normal, High, Emergency), summary. If a field is unknown use an empty string.\" },\n    { role: \"user\", content: \"Subject: \" + $json.subject + \"\\n\\nBody: \" + $json.cleanBody }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "ai-extract-intent",
+      "name": "AI Extract Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "let content = '{}';\ntry {\n  content = $json.message.content;\n} catch (e) {\n  content = '{}';\n}\n\nlet data = {};\ntry {\n  data = JSON.parse(content);\n} catch (e) {\n  data = {};\n}\n\nconst intent = (data.intent || 'General Question').toString();\nconst source = $('Clean Email').first().json;\n\nreturn [{\n  json: {\n    patient_name: data.patient_name || 'Unknown',\n    intent: intent,\n    intent_key: intent.toLowerCase(),\n    doctor: data.doctor || '',\n    date: data.date || '',\n    time: data.time || '',\n    insurance: data.insurance || '',\n    urgency: data.urgency || 'Normal',\n    summary: data.summary || '',\n    from: source.from,\n    subject: source.subject,\n    cleanBody: source.cleanBody\n  }\n}];"
+      },
+      "id": "parse-ai-json",
+      "name": "Parse AI JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.urgency }}",
+              "rightValue": "Emergency",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond2",
+              "leftValue": "={{ $json.intent_key }}",
+              "rightValue": "emergency",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "is-emergency",
+      "name": "Is Emergency?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#clinic-urgent"
+        },
+        "text": "=🚨 EMERGENCY EMAIL RECEIVED\\nPatient: {{$json.patient_name}}\\nFrom: {{$json.from}}\\nSummary: {{$json.summary}}",
+        "otherOptions": {}
+      },
+      "id": "emergency-alert-slack",
+      "name": "Emergency Alert (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        160
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r1",
+                    "leftValue": "={{ $json.intent_key }}",
+                    "rightValue": "appointment",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Appointment"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r2",
+                    "leftValue": "={{ $json.intent_key }}",
+                    "rightValue": "insurance",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Insurance"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r3",
+                    "leftValue": "={{ $json.intent_key }}",
+                    "rightValue": "prescription",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Prescription"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r4",
+                    "leftValue": "={{ $json.intent_key }}",
+                    "rightValue": "billing",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Billing"
+            }
+          ]
+        },
+        "fallbackOutput": "extra",
+        "options": {}
+      },
+      "id": "route-by-intent",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1320,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Update this mapping with your clinic's real Google Calendar IDs.\nconst calendarMap = {\n  'dr. sarah': 'sarah@yourclinic.com',\n  'dr. james': 'james@yourclinic.com'\n};\n\nconst doctorKey = ($json.doctor || '').toLowerCase().trim();\nconst calendarId = calendarMap[doctorKey] || 'primary';\n\nreturn [{\n  json: {\n    ...$json,\n    calendarId\n  }\n}];"
+      },
+      "id": "map-doctor-to-calendar",
+      "name": "Map Doctor to Calendar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.calendarId }}"
+        },
+        "timeMin": "={{ $now.toISO() }}",
+        "timeMax": "={{ $now.plus({ days: 7 }).toISO() }}",
+        "options": {}
+      },
+      "id": "check-doctor-availability",
+      "name": "Check Doctor Availability",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        120
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const events = $input.all().map(i => i.json);\nconst source = $('Map Doctor to Calendar').first().json;\n\n// Simple heuristic: fewer than 5 events in the next 7 days = likely open.\nconst isAvailable = events.length < 5;\n\nreturn [{\n  json: {\n    ...source,\n    availability_note: isAvailable\n      ? `Requested slot appears open (${source.date} ${source.time}).`\n      : `Requested slot may be busy - ${events.length} events already booked in that window; suggest alternative times.`\n  }\n}];"
+      },
+      "id": "determine-available-slot",
+      "name": "Determine Available Slot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/chat",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"llama3.1\",\n  stream: false,\n  messages: [\n    { role: \"system\", content: \"You are a warm, professional medical clinic receptionist. Write a concise email reply to the patient using only the facts provided. Never invent medical advice or availability. Sign off as 'Reception Team'.\" },\n    { role: \"user\", content: \"Patient name: \" + $json.patient_name + \"\\nIntent: \" + $json.intent + \"\\nDoctor: \" + ($json.doctor || \"N/A\") + \"\\nDate: \" + ($json.date || \"N/A\") + \"\\nTime: \" + ($json.time || \"N/A\") + \"\\nInsurance: \" + ($json.insurance || \"N/A\") + \"\\nAvailability note: \" + ($json.availability_note || \"N/A\") + \"\\nPatient summary: \" + $json.summary + \"\\nOriginal message: \" + $json.cleanBody }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "generate-ai-reply",
+      "name": "Generate AI Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "let replyText = '';\ntry {\n  replyText = $json.message.content;\n} catch (e) {\n  replyText = 'Thank you for contacting our clinic. A team member will follow up with you shortly.';\n}\n\nconst original = $('Parse AI JSON').first().json;\n\nreturn [{\n  json: {\n    to: original.from,\n    subject: 'Re: ' + (original.subject || 'Your message to the clinic'),\n    body: replyText,\n    patient_name: original.patient_name,\n    intent: original.intent,\n    urgency: original.urgency\n  }\n}];"
+      },
+      "id": "build-final-email",
+      "name": "Build Final Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "create-gmail-draft",
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2640,
+        380
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Patient": "={{ $json.patient_name }}",
+            "Intent": "={{ $json.intent }}",
+            "Status": "Draft Created",
+            "Timestamp": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "update-patient-records",
+      "name": "Update Patient Records",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2860,
+        380
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#reception"
+        },
+        "text": "=📬 New Patient Reply Drafted\\nPatient: {{$json.patient_name}}\\nIntent: {{$json.intent}}\\nStatus: Draft Created - please review and send.",
+        "otherOptions": {}
+      },
+      "id": "notify-receptionist-slack",
+      "name": "Notify Receptionist (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        380
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Before you activate this workflow\n\n1. **Gmail account** credential - connect on 'Patient Email Trigger' and 'Create Gmail Draft'.\n2. **Ollama** - this uses raw HTTP Request nodes hitting `http://localhost:11434/api/chat` (no credential needed). If n8n runs in Docker and Ollama runs on the host, change the URL in 'AI Extract Intent' and 'Generate AI Reply' to `http://host.docker.internal:11434/api/chat` (Docker Desktop) or your Ollama container's service name, e.g. `http://ollama:11434/api/chat` (Docker Compose network). Pull the model first: `ollama pull llama3.1`. Change the model name in both nodes if you use a different one.\n3. **Google Calendar account** credential on 'Check Doctor Availability'.\n4. **Google Sheets account** credential + real Sheet ID on 'Update Patient Records'.\n5. **Slack account** credential + real channel names on both Slack nodes.\n6. Edit the doctor->calendar mapping in 'Map Doctor to Calendar'.\n7. Test with 'Execute Workflow' on one email before activating.\n8. Note: unlike OpenAI, Ollama's /api/chat doesn't strictly enforce JSON output even with format:'json' on all models - if 'Parse AI JSON' keeps falling back to defaults, check the raw output of 'AI Extract Intent' and consider a model better at instruction-following (e.g. llama3.1, qwen2.5).",
+        "height": 340,
+        "width": 460,
+        "color": 5
+      },
+      "id": "setup-notes",
+      "name": "Setup Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        220,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Patient Email Trigger": {
+      "main": [
+        [
+          {
+            "node": "Clean Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Email": {
+      "main": [
+        [
+          {
+            "node": "AI Extract Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Extract Intent": {
+      "main": [
+        [
+          {
+            "node": "Parse AI JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI JSON": {
+      "main": [
+        [
+          {
+            "node": "Is Emergency?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Emergency?": {
+      "main": [
+        [
+          {
+            "node": "Emergency Alert (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emergency Alert (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Route by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Intent": {
+      "main": [
+        [
+          {
+            "node": "Map Doctor to Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Doctor to Calendar": {
+      "main": [
+        [
+          {
+            "node": "Check Doctor Availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Doctor Availability": {
+      "main": [
+        [
+          {
+            "node": "Determine Available Slot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Available Slot": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Reply": {
+      "main": [
+        [
+          {
+            "node": "Build Final Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Final Email": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gmail Draft": {
+      "main": [
+        [
+          {
+            "node": "Update Patient Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Patient Records": {
+      "main": [
+        [
+          {
+            "node": "Notify Receptionist (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
