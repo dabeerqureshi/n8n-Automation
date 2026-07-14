@@ -1,0 +1,128 @@
+{
+  "name": "AI Email Auto Reply (Ollama + Gmail)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            { "mode": "everyMinute" }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "is:unread"
+        }
+      },
+      "id": "1",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CRED_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $input.first().json;\n\nreturn [{\n  json: {\n    from: msg.from || msg.payload?.headers?.find(h => h.name === 'From')?.value,\n    subject: msg.subject || msg.payload?.headers?.find(h => h.name === 'Subject')?.value,\n    body: msg.snippet || msg.textPlain || '',\n    threadId: msg.threadId,\n    messageId: msg.id\n  }\n}];"
+      },
+      "id": "2",
+      "name": "Extract Email Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "model": "llama3",
+        "options": {
+          "baseUrl": "http://localhost:11434"
+        }
+      },
+      "id": "3",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [440, 200],
+      "credentials": {
+        "ollamaApi": {
+          "id": "OLLAMA_CRED_ID",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an email assistant. Write a professional, concise reply to the email below. Only output the reply text, no subject line.\n\nFrom: {{$json.from}}\nSubject: {{$json.subject}}\nBody:\n{{$json.body}}",
+        "options": {
+          "systemMessage": "You write polite, clear, professional email replies. Keep them short and to the point."
+        }
+      },
+      "id": "4",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "=Re: {{$('Extract Email Data').item.json.subject}}",
+        "message": "={{$json.output}}",
+        "options": {
+          "threadId": "={{$('Extract Email Data').item.json.threadId}}"
+        }
+      },
+      "id": "5",
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [660, 0],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CRED_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "markAsRead",
+        "messageId": "={{$('Extract Email Data').item.json.messageId}}"
+      },
+      "id": "6",
+      "name": "Mark As Read",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [880, 0],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CRED_ID",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [[{ "node": "Extract Email Data", "type": "main", "index": 0 }]]
+    },
+    "Extract Email Data": {
+      "main": [[{ "node": "AI Agent", "type": "main", "index": 0 }]]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [[{ "node": "AI Agent", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "AI Agent": {
+      "main": [[{ "node": "Create Gmail Draft", "type": "main", "index": 0 }]]
+    },
+    "Create Gmail Draft": {
+      "main": [[{ "node": "Mark As Read", "type": "main", "index": 0 }]]
+    }
+  }
+}
