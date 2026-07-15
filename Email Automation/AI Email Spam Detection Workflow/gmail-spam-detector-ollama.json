@@ -1,0 +1,164 @@
+{
+  "name": "AI Email Spam Detection (Gmail + Ollama)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            { "mode": "everyMinute" }
+          ]
+        },
+        "simple": false,
+        "filters": {}
+      },
+      "id": "1a111111-1111-1111-1111-111111111111",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [-200, 0],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $input.first().json;\n\nconst headers = msg.payload?.headers || [];\nconst subject = (headers.find(h => h.name === 'Subject') || {}).value || '';\n\nlet body = '';\nif (msg.payload?.body?.data) {\n  body = Buffer.from(msg.payload.body.data, 'base64').toString('utf-8');\n} else if (msg.payload?.parts) {\n  const part = msg.payload.parts.find(p => p.mimeType === 'text/plain') || msg.payload.parts[0];\n  if (part?.body?.data) {\n    body = Buffer.from(part.body.data, 'base64').toString('utf-8');\n  }\n} else if (msg.snippet) {\n  body = msg.snippet;\n}\n\n// keep prompt small\nbody = body.substring(0, 3000);\n\nreturn [{\n  json: {\n    messageId: msg.id,\n    threadId: msg.threadId,\n    subject,\n    body\n  }\n}];"
+      },
+      "id": "2b222222-2222-2222-2222-222222222222",
+      "name": "Extract Email Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [20, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    model: \"llama3\",\n    stream: false,\n    format: \"json\",\n    prompt: `You are a strict spam email classifier.\\nAnalyze the email below and respond ONLY with JSON: {\"classification\": \"spam\"} or {\"classification\": \"not_spam\"}.\\nNo other text.\\n\\nSubject: ${$json.subject}\\n\\nBody:\\n${$json.body}`\n  })\n}}",
+        "options": {}
+      },
+      "id": "3c333333-3333-3333-3333-333333333333",
+      "name": "Ollama Classify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst prev = $('Extract Email Content').first().json;\n\nlet classification = 'not_spam';\ntry {\n  const parsed = JSON.parse(item.response);\n  classification = (parsed.classification || 'not_spam').toLowerCase().trim();\n} catch (e) {\n  // fallback: naive text check if model didn't return clean JSON\n  classification = /spam/i.test(item.response) && !/not_spam|not spam/i.test(item.response)\n    ? 'spam'\n    : 'not_spam';\n}\n\nreturn [{\n  json: {\n    ...prev,\n    classification\n  }\n}];"
+      },
+      "id": "4d444444-4444-4444-4444-444444444444",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.classification }}",
+              "rightValue": "spam",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5e555555-5555-5555-5555-555555555555",
+      "name": "Is Spam?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [680, 0]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $json.messageId }}",
+        "labelIds": ["SPAM"]
+      },
+      "id": "6f666666-6666-6666-6666-666666666666",
+      "name": "Move to Spam",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [900, -80],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "removeLabels",
+        "messageId": "={{ $json.messageId }}",
+        "labelIds": ["INBOX"]
+      },
+      "id": "7a777777-7777-7777-7777-777777777777",
+      "name": "Remove from Inbox",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, -80],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "8b888888-8888-8888-8888-888888888888",
+      "name": "No Action (Not Spam)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 80]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [[{ "node": "Extract Email Content", "type": "main", "index": 0 }]]
+    },
+    "Extract Email Content": {
+      "main": [[{ "node": "Ollama Classify", "type": "main", "index": 0 }]]
+    },
+    "Ollama Classify": {
+      "main": [[{ "node": "Parse Classification", "type": "main", "index": 0 }]]
+    },
+    "Parse Classification": {
+      "main": [[{ "node": "Is Spam?", "type": "main", "index": 0 }]]
+    },
+    "Is Spam?": {
+      "main": [
+        [{ "node": "Move to Spam", "type": "main", "index": 0 }],
+        [{ "node": "No Action (Not Spam)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Move to Spam": {
+      "main": [[{ "node": "Remove from Inbox", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
