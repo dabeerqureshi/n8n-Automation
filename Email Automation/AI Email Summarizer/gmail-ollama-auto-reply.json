@@ -1,0 +1,114 @@
+{
+  "name": "Gmail Auto Summary + AI Draft Reply (Ollama)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            { "mode": "everyMinute" }
+          ]
+        },
+        "simple": false,
+        "filters": {}
+      },
+      "id": "1a1a1a1a-1111-4111-8111-111111111111",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": true
+      },
+      "id": "2b2b2b2b-2222-4222-8222-222222222222",
+      "name": "Get Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [440, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"llama3\",\n  stream: false,\n  prompt: \"Summarize this email in 2-3 concise sentences.\\n\\nSubject: \" + $json.subject + \"\\nFrom: \" + $json.from + \"\\nBody: \" + ($json.textPlain || $json.snippet)\n}) }}",
+        "options": {}
+      },
+      "id": "3c3c3c3c-3333-4333-8333-333333333333",
+      "name": "Summarize Email (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"llama3\",\n  stream: false,\n  prompt: \"You are a professional assistant. Write a polite, professional reply to the email below. Return ONLY the reply body text, no subject line, no extra commentary.\\n\\nOriginal Email:\\n\" + $node[\"Get Email\"].json.textPlain + \"\\n\\nSummary:\\n\" + $json.response\n}) }}",
+        "options": {}
+      },
+      "id": "4d4d4d4d-4444-4444-8444-444444444444",
+      "name": "Generate Reply (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "to": "={{ $node[\"Get Email\"].json.from }}",
+        "subject": "=Re: {{ $node[\"Get Email\"].json.subject }}",
+        "message": "={{ $json.response }}",
+        "options": {}
+      },
+      "id": "5e5e5e5e-5555-4555-8555-555555555555",
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1160, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [[{ "node": "Get Email", "type": "main", "index": 0 }]]
+    },
+    "Get Email": {
+      "main": [[{ "node": "Summarize Email (Ollama)", "type": "main", "index": 0 }]]
+    },
+    "Summarize Email (Ollama)": {
+      "main": [[{ "node": "Generate Reply (Ollama)", "type": "main", "index": 0 }]]
+    },
+    "Generate Reply (Ollama)": {
+      "main": [[{ "node": "Create Gmail Draft", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
