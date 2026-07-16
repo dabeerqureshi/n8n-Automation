@@ -1,0 +1,418 @@
+{
+  "name": "2 - AI Follow-up Sender",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger-2",
+      "name": "Schedule Trigger (10 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1600, 0]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Clinics",
+          "mode": "list",
+          "cachedResultName": "Clinics"
+        },
+        "options": {}
+      },
+      "id": "readsheet-2",
+      "name": "Read Clinics Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-1380, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json['Email Sent Count'] }}",
+              "rightValue": 1,
+              "operator": {"type": "number", "operation": "equals"}
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json['Follow-up Count'] }}",
+              "rightValue": 3,
+              "operator": {"type": "number", "operation": "lt"}
+            },
+            {
+              "id": "c3",
+              "leftValue": "={{ $json['Status'] }}",
+              "rightValue": "Replied",
+              "operator": {"type": "string", "operation": "notEquals"}
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-2",
+      "name": "Filter: Needs Follow-up",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [-1160, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-2",
+      "name": "Loop Over Clinics",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-940, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst thresholds = [7, 14, 30]; // days: FU1=7, FU2=14, FU3=30\nconst fuCount = Number(item['Follow-up Count'] || 0);\n\nconst baseDateStr = fuCount === 0 ? item['Email Sent Date'] : item['Last Follow-up Date'];\nconst baseDate = new Date(baseDateStr);\nconst today = new Date();\n\nconst daysSince = isNaN(baseDate.getTime()) ? 9999 : Math.floor((today - baseDate) / 86400000);\nconst thresholdForThisStep = thresholds[fuCount] !== undefined ? thresholds[fuCount] : null;\n\nconst shouldFollowUp = thresholdForThisStep !== null && daysSince >= thresholdForThisStep;\n\nreturn [{\n  json: {\n    ...item,\n    daysSince,\n    followUpNumber: fuCount + 1,\n    shouldFollowUp\n  }\n}];"
+      },
+      "id": "code-timing",
+      "name": "Check Timing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{ $json.shouldFollowUp }}",
+              "rightValue": true,
+              "operator": {"type": "boolean", "operation": "equals"}
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-due",
+      "name": "IF: Follow-up Due",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-500, 0]
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "get",
+        "threadId": "={{ $json['Gmail Thread ID'] }}",
+        "options": {}
+      },
+      "id": "gmail-getthread",
+      "name": "Get Gmail Thread",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [-280, -120],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const messages = $json.messages || [];\nconst hasReply = messages.some(m => !((m.labelIds || []).includes('SENT')));\nreturn [{ json: { ...$('Check Timing').item.json, hasReply } }];"
+      },
+      "id": "code-checkreply",
+      "name": "Check For Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, -120]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [
+            {
+              "id": "r1",
+              "leftValue": "={{ $json.hasReply }}",
+              "rightValue": true,
+              "operator": {"type": "boolean", "operation": "equals"}
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-replied",
+      "name": "IF: Has Replied",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [160, -120]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Clinics",
+          "mode": "list",
+          "cachedResultName": "Clinics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Email"],
+          "value": {
+            "Email": "={{ $json['Email'] }}",
+            "Status": "Replied"
+          }
+        },
+        "options": {}
+      },
+      "id": "updatesheet-replied",
+      "name": "Update Sheet (Replied)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [380, -260],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p1",
+              "name": "prompt",
+              "type": "string",
+              "value": "=You are an expert cold email copywriter. Write follow-up email #{{ $json.followUpNumber }} of 3 to a clinic that has not replied to our previous email(s). Keep it short, polite, add a new angle or value point each time, and do not sound pushy.\n\nCLINIC NAME: {{ $json['Clinic Name'] }}\nPHONE: {{ $json['Phone'] }}\n\nPRODUCT INFO:\nOur AI Receptionist answers patient calls 24/7, books appointments automatically, reduces missed calls, and integrates with existing clinic phone systems.\n\nDEMO LINK: https://your-demo-link.com\n\nRULES:\n- Subject line on the first line prefixed with 'Subject:' (use 'Re: ' style since this continues the thread)\n- Under 80 words\n- Reference that this is a gentle follow-up, not a first contact\n- End with a soft call-to-action\n- Sign off as 'Team' (do not invent a person's name)"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "buildprompt-2",
+      "name": "Build Follow-up Prompt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [380, 20]
+    },
+    {
+      "parameters": {
+        "model": "llama3.1",
+        "options": {
+          "baseUrl": "http://host.docker.internal:11434"
+        }
+      },
+      "id": "ollama-model-2",
+      "name": "Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [380, 200],
+      "credentials": {
+        "ollamaApi": {
+          "id": "REPLACE_ME",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "options": {}
+      },
+      "id": "aiagent-2",
+      "name": "Generate Follow-up (AI)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [600, 20]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "emailSubject",
+              "type": "string",
+              "value": "={{ $json.text.split('\\n')[0].replace('Subject:', '').trim() }}"
+            },
+            {
+              "id": "s2",
+              "name": "emailBody",
+              "type": "string",
+              "value": "={{ $json.text.split('\\n').slice(1).join('\\n').trim() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "parse-2",
+      "name": "Parse Subject & Body",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [820, 20]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Check For Reply').item.json['Email'] }}",
+        "subject": "={{ $json.emailSubject }}",
+        "message": "={{ $json.emailBody }}",
+        "options": {
+          "threadId": "={{ $('Check For Reply').item.json['Gmail Thread ID'] }}"
+        }
+      },
+      "id": "gmail-2",
+      "name": "Send Follow-up (Gmail Reply)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1040, 20],
+      "webhookId": "gmail-send-2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Clinics",
+          "mode": "list",
+          "cachedResultName": "Clinics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Email"],
+          "value": {
+            "Email": "={{ $('Check For Reply').item.json['Email'] }}",
+            "Follow-up Count": "={{ $('Check For Reply').item.json.followUpNumber }}",
+            "Last Follow-up Date": "={{ $now.format('yyyy-MM-dd') }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "updatesheet-fu",
+      "name": "Update Sheet (Follow-up Sent)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1260, 20],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (10 AM)": {
+      "main": [[{"node": "Read Clinics Sheet", "type": "main", "index": 0}]]
+    },
+    "Read Clinics Sheet": {
+      "main": [[{"node": "Filter: Needs Follow-up", "type": "main", "index": 0}]]
+    },
+    "Filter: Needs Follow-up": {
+      "main": [[{"node": "Loop Over Clinics", "type": "main", "index": 0}]]
+    },
+    "Loop Over Clinics": {
+      "main": [
+        [],
+        [{"node": "Check Timing", "type": "main", "index": 0}]
+      ]
+    },
+    "Check Timing": {
+      "main": [[{"node": "IF: Follow-up Due", "type": "main", "index": 0}]]
+    },
+    "IF: Follow-up Due": {
+      "main": [
+        [{"node": "Get Gmail Thread", "type": "main", "index": 0}],
+        [{"node": "Loop Over Clinics", "type": "main", "index": 0}]
+      ]
+    },
+    "Get Gmail Thread": {
+      "main": [[{"node": "Check For Reply", "type": "main", "index": 0}]]
+    },
+    "Check For Reply": {
+      "main": [[{"node": "IF: Has Replied", "type": "main", "index": 0}]]
+    },
+    "IF: Has Replied": {
+      "main": [
+        [{"node": "Update Sheet (Replied)", "type": "main", "index": 0}],
+        [{"node": "Build Follow-up Prompt", "type": "main", "index": 0}]
+      ]
+    },
+    "Update Sheet (Replied)": {
+      "main": [[{"node": "Loop Over Clinics", "type": "main", "index": 0}]]
+    },
+    "Build Follow-up Prompt": {
+      "main": [[{"node": "Generate Follow-up (AI)", "type": "main", "index": 0}]]
+    },
+    "Ollama Model": {
+      "ai_languageModel": [[{"node": "Generate Follow-up (AI)", "type": "ai_languageModel", "index": 0}]]
+    },
+    "Generate Follow-up (AI)": {
+      "main": [[{"node": "Parse Subject & Body", "type": "main", "index": 0}]]
+    },
+    "Parse Subject & Body": {
+      "main": [[{"node": "Send Follow-up (Gmail Reply)", "type": "main", "index": 0}]]
+    },
+    "Send Follow-up (Gmail Reply)": {
+      "main": [[{"node": "Update Sheet (Follow-up Sent)", "type": "main", "index": 0}]]
+    },
+    "Update Sheet (Follow-up Sent)": {
+      "main": [[{"node": "Loop Over Clinics", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

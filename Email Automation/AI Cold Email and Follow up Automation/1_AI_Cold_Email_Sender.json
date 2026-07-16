@@ -1,0 +1,279 @@
+{
+  "name": "1 - AI Cold Email Sender",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger-1",
+      "name": "Schedule Trigger (8 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1400, 0]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Clinics",
+          "mode": "list",
+          "cachedResultName": "Clinics"
+        },
+        "options": {}
+      },
+      "id": "readsheet-1",
+      "name": "Read Clinics Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-1180, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json['Email Sent Count'] }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-1",
+      "name": "Filter: Not Yet Emailed",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [-960, 0]
+    },
+    {
+      "parameters": {
+        "maxItems": 5
+      },
+      "id": "limit-1",
+      "name": "Limit to 5 Clinics",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [-740, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-1",
+      "name": "Loop Over Clinics",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-520, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "prompt",
+              "type": "string",
+              "value": "=You are an expert cold email copywriter. Write a short, personalized, non-spammy cold email to a dental/medical clinic offering our AI Receptionist product.\n\nCLINIC NAME: {{ $json['Clinic Name'] }}\nPHONE: {{ $json['Phone'] }}\nEMAIL: {{ $json['Email'] }}\n\nPRODUCT INFO:\nOur AI Receptionist answers patient calls 24/7, books appointments automatically, reduces missed calls, and integrates with existing clinic phone systems. It cuts front-desk workload and increases booked appointments.\n\nDEMO LINK: https://your-demo-link.com\n\nRULES:\n- Subject line on the first line prefixed with 'Subject:'\n- Keep the email under 120 words\n- Mention the clinic name naturally once\n- End with a soft call-to-action (offer the demo link)\n- No generic filler like 'I hope this email finds you well'\n- Sign off as 'Team' (do not invent a person's name)"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "buildprompt-1",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-300, -120]
+    },
+    {
+      "parameters": {
+        "model": "llama3.1",
+        "options": {
+          "baseUrl": "http://host.docker.internal:11434"
+        }
+      },
+      "id": "ollama-model-1",
+      "name": "Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [-300, 100],
+      "credentials": {
+        "ollamaApi": {
+          "id": "REPLACE_ME",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "options": {}
+      },
+      "id": "aiagent-1",
+      "name": "Generate Cold Email (AI)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [-80, -120]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "emailSubject",
+              "type": "string",
+              "value": "={{ $json.text.split('\\n')[0].replace('Subject:', '').trim() }}"
+            },
+            {
+              "id": "s2",
+              "name": "emailBody",
+              "type": "string",
+              "value": "={{ $json.text.split('\\n').slice(1).join('\\n').trim() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "parse-1",
+      "name": "Parse Subject & Body",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [140, -120]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Loop Over Clinics').item.json['Email'] }}",
+        "subject": "={{ $json.emailSubject }}",
+        "message": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "gmail-1",
+      "name": "Send Cold Email (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [360, -120],
+      "webhookId": "gmail-send-1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Clinics",
+          "mode": "list",
+          "cachedResultName": "Clinics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Email"],
+          "value": {
+            "Email": "={{ $('Loop Over Clinics').item.json['Email'] }}",
+            "Email Sent Count": 1,
+            "Email Sent Date": "={{ $now.format('yyyy-MM-dd') }}",
+            "Follow-up Count": 0,
+            "Gmail Thread ID": "={{ $json.threadId }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "updatesheet-1",
+      "name": "Update Sheet (Sent)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [580, -120],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (8 AM)": {
+      "main": [[{"node": "Read Clinics Sheet", "type": "main", "index": 0}]]
+    },
+    "Read Clinics Sheet": {
+      "main": [[{"node": "Filter: Not Yet Emailed", "type": "main", "index": 0}]]
+    },
+    "Filter: Not Yet Emailed": {
+      "main": [[{"node": "Limit to 5 Clinics", "type": "main", "index": 0}]]
+    },
+    "Limit to 5 Clinics": {
+      "main": [[{"node": "Loop Over Clinics", "type": "main", "index": 0}]]
+    },
+    "Loop Over Clinics": {
+      "main": [
+        [],
+        [{"node": "Build Prompt", "type": "main", "index": 0}]
+      ]
+    },
+    "Build Prompt": {
+      "main": [[{"node": "Generate Cold Email (AI)", "type": "main", "index": 0}]]
+    },
+    "Ollama Model": {
+      "ai_languageModel": [[{"node": "Generate Cold Email (AI)", "type": "ai_languageModel", "index": 0}]]
+    },
+    "Generate Cold Email (AI)": {
+      "main": [[{"node": "Parse Subject & Body", "type": "main", "index": 0}]]
+    },
+    "Parse Subject & Body": {
+      "main": [[{"node": "Send Cold Email (Gmail)", "type": "main", "index": 0}]]
+    },
+    "Send Cold Email (Gmail)": {
+      "main": [[{"node": "Update Sheet (Sent)", "type": "main", "index": 0}]]
+    },
+    "Update Sheet (Sent)": {
+      "main": [[{"node": "Loop Over Clinics", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
