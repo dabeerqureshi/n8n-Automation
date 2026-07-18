@@ -1,0 +1,521 @@
+{
+  "name": "WhatsApp Appointment Booking - Simple (Ollama + Google Calendar + Gmail)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET,POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "whatsapp_webhook",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.query && $json.query['hub.mode'] }}",
+              "rightValue": "subscribe",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is_verification",
+      "name": "Is Verification",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond_challenge",
+      "name": "Respond Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        440,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst entry = body && body.entry && body.entry[0];\nconst change = entry && entry.changes && entry.changes[0];\nconst value = change && change.value;\nconst message = value && value.messages && value.messages[0];\n\nif (!message) {\n  return [{ json: { hasMessage: false } }];\n}\n\nconst phone = message.from;\nconst phoneNumberId = value.metadata && value.metadata.phone_number_id;\nconst text = message.type === 'text' ? message.text.body : '[unsupported message type]';\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.conversations) staticData.conversations = {};\nconst state = staticData.conversations[phone] || {\n  date: null, time: null, time_range: null,\n  name: null, email: null, status: 'new', history: []\n};\n\nconst systemPrompt = `You are a friendly WhatsApp appointment booking assistant.\nGuide users through booking appointments naturally, one question at a time.\nUnderstand natural language dates/times; convert dates to YYYY-MM-DD and times to 24h HH:MM.\nNever ask for info already known (see state below).\nIf date or time is missing, ask for it.\nOnce date and time are known, set action \"CHECK_CALENDAR\" so availability can be checked.\nOnce slot is confirmed and name is missing, ask for full name, action \"REPLY\".\nOnce name known and email missing, ask for email, action \"REPLY\".\nOnce name, email, date and time are all known, set action \"CREATE_EVENT\".\nNever mention APIs, Google Calendar, n8n, or internal systems.\n\nRespond ONLY with valid JSON, no extra text:\n{\n  \"action\": \"REPLY\" | \"CHECK_CALENDAR\" | \"CREATE_EVENT\",\n  \"reply\": \"message to send, or null if action needs a backend result first\",\n  \"date\": \"YYYY-MM-DD or null\",\n  \"time\": \"HH:MM or null\",\n  \"time_range\": \"morning|afternoon|evening or null\",\n  \"name\": \"string or null\",\n  \"email\": \"string or null\"\n}`;\n\nconst messages = [\n  { role: 'system', content: systemPrompt },\n  { role: 'system', content: `Known state so far: ${JSON.stringify(state)}` },\n  ...(state.history || []),\n  { role: 'user', content: text }\n];\n\nreturn [{ json: { hasMessage: true, phone, phoneNumberId, text, state, ollamaMessages: messages } }];"
+      },
+      "id": "prepare_message_and_state",
+      "name": "Prepare Message and State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.hasMessage }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "has_message",
+      "name": "Has Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "EVENT_RECEIVED",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond_ack",
+      "name": "Respond Ack",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3.1', messages: $json.ollamaMessages, stream: false, format: 'json' }) }}",
+        "options": {}
+      },
+      "id": "call_ollama",
+      "name": "Call Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let content = ($json.message && $json.message.content) || '{}';\nlet parsed;\ntry { parsed = JSON.parse(content); }\ncatch (e) { parsed = { action: 'REPLY', reply: \"Sorry, could you rephrase that?\" }; }\n\nconst prev = $('Prepare Message and State').first().json;\nconst state = prev.state;\n\nif (parsed.date) state.date = parsed.date;\nif (parsed.time) state.time = parsed.time;\nif (parsed.time_range) state.time_range = parsed.time_range;\nif (parsed.name) state.name = parsed.name;\nif (parsed.email) state.email = parsed.email;\n\nconst day = state.date || new Date(Date.now() + 86400000).toISOString().slice(0, 10);\n\nreturn [{\n  json: {\n    ...prev,\n    action: parsed.action,\n    aiReply: parsed.reply,\n    state,\n    day,\n    timeMin: `${day}T00:00:00`,\n    timeMax: `${day}T23:59:59`\n  }\n}];"
+      },
+      "id": "parse_ai_and_set_query_range",
+      "name": "Parse AI and Set Query Range",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "timeMin": "={{ $json.timeMin }}",
+        "timeMax": "={{ $json.timeMax }}",
+        "options": {}
+      },
+      "id": "check_day_events",
+      "name": "Check Day Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1100,
+        100
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Parse AI and Set Query Range').first().json;\nconst state = ctx.state;\nconst day = ctx.day;\nconst events = $input.all().map(i => i.json).filter(e => e.start);\n\nconst workStart = 9, workEnd = 17, slotMin = 30;\nlet slots = [];\nfor (let h = workStart; h < workEnd; h++) {\n  for (let m = 0; m < 60; m += slotMin) {\n    const start = new Date(`${day}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);\n    const end = new Date(start.getTime() + slotMin * 60000);\n    const overlaps = events.some(e => {\n      const bs = new Date(e.start.dateTime || e.start.date);\n      const be = new Date(e.end.dateTime || e.end.date);\n      return start < be && end > bs;\n    });\n    if (!overlaps) slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);\n  }\n}\n\nconst range = state.time_range;\nif (range === 'morning') slots = slots.filter(s => s < '12:00');\nif (range === 'afternoon') slots = slots.filter(s => s >= '12:00' && s < '17:00');\nif (range === 'evening') slots = slots.filter(s => s >= '17:00');\n\nconst requestedSlotFree = state.time ? slots.includes(state.time) : false;\nconst readyToBook = ctx.action === 'CREATE_EVENT' && state.name && state.email && state.date && state.time && requestedSlotFree;\n\nlet finalReply;\nif (readyToBook) {\n  finalReply = null; // will be set after booking\n} else if (ctx.action === 'CHECK_CALENDAR' || (state.time && !requestedSlotFree)) {\n  const top3 = slots.slice(0, 3);\n  finalReply = top3.length\n    ? `Here are the available times:\\n\\n${top3.map(s => `\u2022 ${s}`).join('\\n')}\\n\\nWhich works best for you?`\n    : `Sorry, nothing is free then. Could you try another day?`;\n} else {\n  finalReply = ctx.aiReply || 'Could you tell me more?';\n}\n\nlet eventStart = null, eventEnd = null;\nif (readyToBook) {\n  eventStart = `${state.date}T${state.time}:00`;\n  const endDate = new Date(new Date(eventStart).getTime() + 30 * 60000);\n  const pad = n => String(n).padStart(2, '0');\n  eventEnd = `${state.date}T${pad(endDate.getHours())}:${pad(endDate.getMinutes())}:00`;\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    readyToBook,\n    finalReply,\n    eventStart,\n    eventEnd,\n    eventSummary: `Appointment - ${state.name || ''}`\n  }\n}];"
+      },
+      "id": "decide_slots_and_booking",
+      "name": "Decide Slots and Booking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.readyToBook }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ready_to_book",
+      "name": "Ready To Book",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "start": "={{ $json.eventStart }}",
+        "end": "={{ $json.eventEnd }}",
+        "additionalFields": {
+          "summary": "={{ $json.eventSummary }}",
+          "description": "Booked via WhatsApp AI Assistant",
+          "attendees": "={{ $json.state.email }}"
+        }
+      },
+      "id": "create_appointment",
+      "name": "Create Appointment",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1760,
+        0
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.state.email }}",
+        "subject": "Appointment Confirmed",
+        "message": "=Hello {{ $json.state.name }},\\n\\nYour appointment has been confirmed.\\n\\nDate: {{ $json.state.date }}\\nTime: {{ $json.state.time }}\\n\\nThank you.\\nWe look forward to seeing you.",
+        "options": {}
+      },
+      "id": "send_confirmation_email",
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1980,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst state = $json.state;\nlet finalReply = $json.finalReply;\n\nif ($json.readyToBook) {\n  finalReply = `You're all set! Your appointment is confirmed for ${state.date} at ${state.time}. I've also sent a confirmation email to ${state.email}.`;\n}\n\nstate.history = state.history || [];\nstate.history.push({ role: 'user', content: $json.text });\nstate.history.push({ role: 'assistant', content: finalReply });\nif (state.history.length > 20) state.history = state.history.slice(-20);\nstaticData.conversations[$json.phone] = state;\n\nreturn [{ json: { ...$json, finalReply } }];"
+      },
+      "id": "save_state_and_reply",
+      "name": "Save State and Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $json.phoneNumberId }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.phone, text: { body: $json.finalReply } }) }}",
+        "options": {}
+      },
+      "id": "send_whatsapp_reply",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        100
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WhatsApp Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond_success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "Is Verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Verification": {
+      "main": [
+        [
+          {
+            "node": "Respond Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Message and State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Message and State": {
+      "main": [
+        [
+          {
+            "node": "Has Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Message": {
+      "main": [
+        [
+          {
+            "node": "Respond Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Ollama": {
+      "main": [
+        [
+          {
+            "node": "Parse AI and Set Query Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI and Set Query Range": {
+      "main": [
+        [
+          {
+            "node": "Check Day Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Day Events": {
+      "main": [
+        [
+          {
+            "node": "Decide Slots and Booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Slots and Booking": {
+      "main": [
+        [
+          {
+            "node": "Ready To Book",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready To Book": {
+      "main": [
+        [
+          {
+            "node": "Create Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save State and Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Appointment": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmation Email": {
+      "main": [
+        [
+          {
+            "node": "Save State and Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save State and Reply": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Reply": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
