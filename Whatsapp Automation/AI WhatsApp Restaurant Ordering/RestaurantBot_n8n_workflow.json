@@ -1,0 +1,1872 @@
+{
+  "name": "RestaurantBot - WhatsApp Ordering (Production)",
+  "nodes": [
+    {
+      "id": "44fbf5c2-e8da-4804-a59c-a1e4b1d66ed4",
+      "name": "WhatsApp Trigger",
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "updates": [
+          "messages"
+        ]
+      },
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "3",
+          "name": "WhatsApp OAuth account"
+        }
+      }
+    },
+    {
+      "id": "a4620dd8-2ef4-4db5-942a-aab725ba52aa",
+      "name": "Parse Incoming Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst item = $input.first().json;\nconst body = item.body || item;\nlet isValidMessage = false;\nlet phone = '';\nlet name = 'Customer';\nlet text = '';\nlet messageType = '';\n\ntry {\n  const entry = body.entry && body.entry[0];\n  const change = entry && entry.changes && entry.changes[0];\n  const value = change && change.value;\n  const message = value && value.messages && value.messages[0];\n  const contact = value && value.contacts && value.contacts[0];\n\n  if (message) {\n    isValidMessage = true;\n    phone = message.from;\n    name = (contact && contact.profile && contact.profile.name) || 'Customer';\n    messageType = message.type;\n    if (messageType === 'text') {\n      text = (message.text.body || '').trim();\n    } else if (messageType === 'button') {\n      text = (message.button && message.button.text || '').trim();\n    } else if (messageType === 'interactive') {\n      text = (message.interactive && message.interactive.button_reply && message.interactive.button_reply.title) || '';\n    } else {\n      // unsupported type (image, audio, location, sticker etc.)\n      text = '';\n    }\n  }\n} catch (e) {\n  isValidMessage = false;\n}\n\nreturn [{ json: { isValidMessage, phone, name, text, messageType } }];\n"
+      }
+    },
+    {
+      "id": "32564863-1ea2-4132-80d4-5cd00bffec12",
+      "name": "Is Text Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c315c881-e758-42a2-93c6-2747b103e6c7",
+              "leftValue": "={{$json.isValidMessage}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cb185ad7-a775-40d6-952e-3b877819197f",
+              "leftValue": "={{$json.text}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7e46a4b6-3aa9-452f-9e8c-880eb9716f07",
+      "name": "Get Session",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        780,
+        -120
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Phone",
+              "lookupValue": "={{$json.phone}}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "32a5eb27-d368-4c9a-b8ac-5fc448231098",
+      "name": "Normalize Session",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "\nconst incoming = $('Parse Incoming Message').first().json;\nconst rows = $input.all();\nlet session;\nif (rows.length === 0 || !rows[0].json || !rows[0].json.Phone) {\n  session = { Phone: incoming.phone, Stage: 'NONE', Items: '', Total: '', Address: '', OrderID: '' };\n} else {\n  session = rows[0].json;\n  if (!session.Stage) session.Stage = 'NONE';\n}\nreturn [{ json: { ...incoming, session } }];\n"
+      }
+    },
+    {
+      "id": "5719c816-cd7c-40b6-8219-6fe506544717",
+      "name": "Get Working Hours",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        -120
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "WorkingHours",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "b98a4ba0-de78-409b-b50d-7ddca52e2979",
+      "name": "Check Business Hours",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "\n// NOTE: adjust the timeZone below to your restaurant's local timezone.\nconst TIMEZONE = 'Asia/Karachi';\nconst ctx = $('Normalize Session').first().json;\nconst hoursRows = $input.all().map(i => i.json);\n\nconst days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];\nconst now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));\nconst currentDay = days[now.getDay()];\nconst currentTime = now.toTimeString().slice(0,5);\n\nconst todayRow = hoursRows.find(r => r.Day === currentDay) || {};\nlet isOpen = false;\nif (String(todayRow.AcceptOrders || '').toLowerCase() === 'yes' && todayRow.Open && todayRow.Open !== 'Closed') {\n  if (currentTime >= todayRow.Open && currentTime <= todayRow.Close) {\n    isOpen = true;\n  }\n}\n\nreturn [{ json: { ...ctx, isOpen, todayOpen: todayRow.Open || 'Closed', todayClose: todayRow.Close || 'Closed' } }];\n"
+      }
+    },
+    {
+      "id": "a9f4921d-2d21-4ca2-bea6-616e6816eceb",
+      "name": "Is Open",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "728fed1a-9724-4934-bfff-483a28124359",
+              "leftValue": "={{$json.isOpen}}",
+              "rightValue": true,
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7e4c6b7d-505b-46e0-a063-6055579ed7d9",
+      "name": "Send Closed Message",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        -260
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=Sorry, we are currently closed. \ud83d\ude4f\nToday's hours: {{$json.todayOpen}} - {{$json.todayClose}}\nPlease message us again during working hours!",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "1dc8e958-736f-4f66-8160-0d1a77713948",
+      "name": "Is Stage New",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "dbb0a157-e02f-4a80-b40c-693362faf3c4",
+              "leftValue": "={{$json.session.Stage}}",
+              "rightValue": "NONE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3c651d8f-39e4-4936-a0cd-bf9b17c7e8f3",
+      "name": "Is Stage Waiting Address",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "bd0423d6-9e22-491f-b8fe-e4117b3993b3",
+              "leftValue": "={{$json.session.Stage}}",
+              "rightValue": "WAITING_ADDRESS",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "75e88091-a989-422c-bdbf-aee305d6f1ff",
+      "name": "Is Stage Waiting Confirmation",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f6a96ecd-189c-40f5-852d-39132ca7fe94",
+              "leftValue": "={{$json.session.Stage}}",
+              "rightValue": "WAITING_CONFIRMATION",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "757bc715-5150-4703-94a5-abb0de546f6b",
+      "name": "Reset Corrupted Session",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2860,
+        300
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": [
+            {
+              "column": "Phone",
+              "value": "={{$json.phone}}"
+            },
+            {
+              "column": "Stage",
+              "value": "NONE"
+            },
+            {
+              "column": "Items",
+              "value": ""
+            },
+            {
+              "column": "Total",
+              "value": ""
+            },
+            {
+              "column": "Address",
+              "value": ""
+            },
+            {
+              "column": "OrderID",
+              "value": ""
+            },
+            {
+              "column": "LastUpdated",
+              "value": "={{$now.toISO()}}"
+            }
+          ],
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "56df7661-fb92-41ad-ad00-82d78bda8fa8",
+      "name": "Send Generic Error Retry",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        300
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=Sorry, something went wrong on our end. Please send your message again \ud83d\ude4f",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "723ef897-e954-4d23-a0d3-e8c9069a5394",
+      "name": "Get Menu",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2340,
+        -420
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Menu",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "5b3088a5-8da0-434b-8f0e-f6eedc28a687",
+      "name": "Get FAQ",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2340,
+        -300
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "FAQ",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "454ea6c2-9319-49d7-87a8-9414543a2dbf",
+      "name": "Build AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2600,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx = $('Is Stage New').first().json;\nconst menuRows = $('Get Menu').all().map(i => i.json);\nconst faqRows = $('Get FAQ').all().map(i => i.json);\n\nconst menuText = menuRows\n  .filter(r => String(r.Available).toLowerCase() === 'yes')\n  .map(r => `- ${r.Item}: Rs.${r.Price}`).join('\\n');\n\nconst faqText = faqRows.map(r => `Q: ${r.Question}\\nA: ${r.Answer}`).join('\\n');\n\nconst systemPrompt = `You are a WhatsApp ordering assistant for a small restaurant in Lahore, Pakistan.\nYou must respond with STRICT, VALID JSON ONLY. No explanations, no markdown, no extra text before or after the JSON.\n\nTODAY'S AVAILABLE MENU:\n${menuText}\n\nRESTAURANT FAQ:\n${faqText}\n\nYOUR TASK:\nRead the customer's message and classify it into exactly one of these intents: \"order\", \"faq\", \"status\", or \"unknown\".\n\nRULES:\n1. \"order\" - customer wants to order food. Extract ONLY items that exist in the menu above (match names case-insensitively, allow minor typos e.g. \"burgr\" -> \"Burger\"). If an item the customer asked for is not on the menu, still include it in \"items\" exactly as they wrote it (it will be validated and rejected downstream) - do not silently drop it or substitute it.\n2. \"faq\" - customer is asking a question that matches one of the FAQ topics above (delivery charges, minimum order, payment methods, delivery time, location, etc).\n3. \"status\" - customer is asking about an existing order, usually mentioning an order number like ORD-123456, or asking \"where is my order\".\n4. \"unknown\" - greetings, small talk, or anything that doesn't clearly fit the above (e.g. \"hi\", \"hello\", \"thanks\").\n\nOUTPUT FORMAT (JSON only, exactly one of these shapes):\nFor order: {\"intent\":\"order\",\"items\":[{\"item\":\"Burger\",\"qty\":2}]}\nFor faq: {\"intent\":\"faq\",\"question\":\"Delivery Charges\"}\nFor status: {\"intent\":\"status\",\"order_id\":\"ORD-123456\"}\nFor unknown: {\"intent\":\"unknown\"}\n\nRespond with the JSON object only.`;\n\nconst userMessage = ctx.text;\n\nreturn [{ json: { ...ctx, aiSystemPrompt: systemPrompt, aiUserMessage: userMessage } }];\n"
+      }
+    },
+    {
+      "id": "af60df87-deb8-4327-ad49-594ec7648093",
+      "name": "Call Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        -360
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.OLLAMA_HOST}}/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL, stream: false, format: 'json', options: { temperature: 0.1 }, messages: [ { role: 'system', content: $json.aiSystemPrompt }, { role: 'user', content: $json.aiUserMessage } ] }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "904781e8-bed3-48db-a857-ba87473fff0f",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx = $('Build AI Prompt').first().json;\nconst raw = $input.first().json;\nlet intentData = { intent: 'unknown' };\n\ntry {\n  const content = raw.message && raw.message.content ? raw.message.content : (raw.response || '{}');\n  const cleaned = content.replace(/```json|```/g, '').trim();\n  const parsed = JSON.parse(cleaned);\n  if (parsed && parsed.intent) {\n    intentData = parsed;\n  }\n} catch (e) {\n  intentData = { intent: 'unknown' };\n}\n\nreturn [{ json: { ...ctx, intentData } }];\n"
+      }
+    },
+    {
+      "id": "7d713958-6550-4e91-ad9e-b737a7743f46",
+      "name": "Is Intent FAQ",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        -460
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "3c477124-768f-4dd2-91cd-15a1d4dc5ad6",
+              "leftValue": "={{$json.intentData.intent}}",
+              "rightValue": "faq",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0cc8e145-6f1b-4d48-93a4-5e5af5f5411d",
+      "name": "Is Intent Order",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3640,
+        -320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "aa33bc52-627c-492d-8197-706cc94b6d41",
+              "leftValue": "={{$json.intentData.intent}}",
+              "rightValue": "order",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3df016a6-ab82-4b24-8210-a799a5c7f7de",
+      "name": "Is Intent Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3900,
+        60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "87c02f20-276a-4a21-a588-3eace7cb65e2",
+              "leftValue": "={{$json.intentData.intent}}",
+              "rightValue": "status",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9f3cc42d-5252-4e22-b446-73d75180ba98",
+      "name": "Send Clarify Message",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        4160,
+        60
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=Hi {{$json.name}} \ud83d\udc4b Welcome! You can:\n- Ask about our menu or order food (e.g. \"2 Burgers and 1 Pizza S\")\n- Ask a question (delivery charges, timing, location)\n- Check an order status (e.g. \"status ORD-123456\")\n\nHow can I help you today?",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "f40831c6-9400-43db-9a83-51a5b93ae9c5",
+      "name": "Lookup FAQ Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        3640,
+        -520
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx = $('Is Intent FAQ').first().json;\nconst faqRows = $('Get FAQ').all().map(i => i.json);\nconst q = (ctx.intentData.question || ctx.text || '').toLowerCase();\n\nlet match = faqRows.find(r => q.includes(String(r.Question).toLowerCase()) || String(r.Question).toLowerCase().includes(q));\nif (!match) {\n  match = { Answer: \"Sorry, I couldn't find an answer to that. Please call the restaurant directly, or ask about delivery charges, minimum order, payment methods, delivery time, or location.\" };\n}\n\nreturn [{ json: { ...ctx, faqAnswer: match.Answer } }];\n"
+      }
+    },
+    {
+      "id": "8833296a-6965-4cd5-8f2b-055f6628613b",
+      "name": "Send FAQ Reply",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        3900,
+        -520
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "={{$json.faqAnswer}}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "3cc925ec-df88-437c-96c7-ca0b7defbb15",
+      "name": "Validate Order And Calc Total",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        3900,
+        -320
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx = $('Is Intent Order').first().json;\nconst menuRows = $('Get Menu').all().map(i => i.json);\nconst requested = (ctx.intentData.items || []);\n\nconst validated = [];\nconst invalid = [];\nlet total = 0;\n\nfor (const req of requested) {\n  const qty = Math.max(1, parseInt(req.qty, 10) || 1);\n  const menuItem = menuRows.find(m => String(m.Item).toLowerCase() === String(req.item).toLowerCase());\n  if (!menuItem || String(menuItem.Available).toLowerCase() !== 'yes') {\n    invalid.push(req.item);\n  } else {\n    const price = parseFloat(menuItem.Price) || 0;\n    total += price * qty;\n    validated.push({ item: menuItem.Item, qty, price });\n  }\n}\n\nconst isValid = validated.length > 0 && invalid.length === 0;\n\nreturn [{ json: { ...ctx, validatedItems: validated, invalidItems: invalid, orderTotal: total, isOrderValid: isValid } }];\n"
+      }
+    },
+    {
+      "id": "f247043e-6e6b-4baf-80b9-8bf52607b34d",
+      "name": "Is Order Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        -320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "e3c3f383-7224-4683-9012-1496676afeac",
+              "leftValue": "={{$json.isOrderValid}}",
+              "rightValue": true,
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "702b4bd8-12b2-481e-b0a4-040b8336f302",
+      "name": "Send Invalid Items",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        4420,
+        -400
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=Sorry, some items are not available: {{$json.invalidItems.join(', ')}}.\nPlease check the menu and try again, or reply \"menu\" to see today's items.",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "1b21afff-5de7-4b8c-a4ca-6591b7563041",
+      "name": "Update Session Waiting Address",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4420,
+        -240
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": [
+            {
+              "column": "Phone",
+              "value": "={{$json.phone}}"
+            },
+            {
+              "column": "Stage",
+              "value": "WAITING_ADDRESS"
+            },
+            {
+              "column": "Items",
+              "value": "={{JSON.stringify($json.validatedItems)}}"
+            },
+            {
+              "column": "Total",
+              "value": "={{$json.orderTotal}}"
+            },
+            {
+              "column": "Address",
+              "value": ""
+            },
+            {
+              "column": "OrderID",
+              "value": ""
+            },
+            {
+              "column": "LastUpdated",
+              "value": "={{$now.toISO()}}"
+            }
+          ],
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "62e51f50-69f8-4079-873c-14b7b121b9e3",
+      "name": "Send Ask Address",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        4680,
+        -240
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=Order Summary:\n{{$json.validatedItems.map(i => `${i.qty} x ${i.item} - Rs.${i.qty*i.price}`).join('\\n')}}\n\nTotal: Rs.{{$json.orderTotal}}\n\nPlease send your delivery address to continue.",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "29f94f56-9437-4b9a-aca9-ebc796780eb4",
+      "name": "Extract Order ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        4160,
+        60
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx = $('Is Intent Status').first().json;\nlet orderId = ctx.intentData.order_id || '';\nif (!orderId) {\n  const m = ctx.text.match(/ORD-?\\d+/i);\n  orderId = m ? m[0].toUpperCase().replace('ORD', 'ORD-').replace('--', '-') : '';\n}\nreturn [{ json: { ...ctx, lookupOrderId: orderId } }];\n"
+      }
+    },
+    {
+      "id": "af840a50-919f-43e7-a7fa-64abfbbf67bc",
+      "name": "Lookup Order",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4420,
+        60
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Orders",
+          "mode": "name"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "OrderID",
+              "lookupValue": "={{$json.lookupOrderId}}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "9b593595-8b72-46c8-ad03-14021ff5c675",
+      "name": "Format Status Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        4680,
+        60
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx = $('Extract Order ID').first().json;\nconst rows = $input.all();\nlet reply;\nif (!ctx.lookupOrderId) {\n  reply = \"Please tell me your order number, e.g. \\\"status ORD-123456\\\".\";\n} else if (rows.length === 0 || !rows[0].json.OrderID) {\n  reply = `Sorry, I couldn't find order ${ctx.lookupOrderId}. Please double check the order number.`;\n} else {\n  const o = rows[0].json;\n  reply = `Order ${o.OrderID}\\nStatus: ${o.Status}\\nTotal: Rs.${o.Total}`;\n}\nreturn [{ json: { ...ctx, statusReply: reply } }];\n"
+      }
+    },
+    {
+      "id": "a0d232bf-9a4c-4477-87f2-c75fcfafb0dc",
+      "name": "Send Status Reply",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        4940,
+        60
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "={{$json.statusReply}}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "7da25fb1-1715-4d0f-bb5a-46bf91c96007",
+      "name": "Save Address And Create Order ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2600,
+        420
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx = $('Is Stage Waiting Address').first().json;\nconst orderId = 'ORD-' + Date.now().toString().slice(-6);\nconst address = ctx.text;\nreturn [{ json: { ...ctx, address, orderId } }];\n"
+      }
+    },
+    {
+      "id": "2f3092c7-a5b6-4093-b19d-5487a4ebe492",
+      "name": "Update Session Waiting Confirmation",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2860,
+        420
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": [
+            {
+              "column": "Phone",
+              "value": "={{$json.phone}}"
+            },
+            {
+              "column": "Stage",
+              "value": "WAITING_CONFIRMATION"
+            },
+            {
+              "column": "Items",
+              "value": "={{$json.session.Items}}"
+            },
+            {
+              "column": "Total",
+              "value": "={{$json.session.Total}}"
+            },
+            {
+              "column": "Address",
+              "value": "={{$json.address}}"
+            },
+            {
+              "column": "OrderID",
+              "value": "={{$json.orderId}}"
+            },
+            {
+              "column": "LastUpdated",
+              "value": "={{$now.toISO()}}"
+            }
+          ],
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "4073fe2d-9d57-450e-81f7-55f2ba20d85c",
+      "name": "Send Order Summary Confirm",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        420
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=Order Number: {{$json.orderId}}\nTotal: Rs.{{$json.session.Total}}\nDelivery Address: {{$json.address}}\nEstimated Delivery: 30-40 Minutes\n\nReply YES to confirm or NO to cancel.",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "2f14cb7a-24b4-4ab8-ac18-ddd447dd893d",
+      "name": "Check Confirmation Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        560
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx = $('Is Stage Waiting Confirmation').first().json;\nconst t = (ctx.text || '').toLowerCase();\nlet confirmationResult = 'UNCLEAR';\nif (/\\b(yes|y|confirm|ok|okay)\\b/.test(t)) confirmationResult = 'YES';\nelse if (/\\b(no|n|cancel)\\b/.test(t)) confirmationResult = 'NO';\nreturn [{ json: { ...ctx, confirmationResult } }];\n"
+      }
+    },
+    {
+      "id": "7415c552-cbc6-467d-bb6a-2b431287a6b4",
+      "name": "Is Confirmation Yes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        560
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "08a05c20-07ba-4216-81d2-50ea13ca839c",
+              "leftValue": "={{$json.confirmationResult}}",
+              "rightValue": "YES",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e2eb4f27-456b-47ad-aef0-68639dd448cd",
+      "name": "Is Confirmation No",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        700
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "676b1079-dd54-4a88-a682-2a1e83bbfdf4",
+              "leftValue": "={{$json.confirmationResult}}",
+              "rightValue": "NO",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "273a7186-eef0-4b98-a278-83be620ffe6f",
+      "name": "Append Order To Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3380,
+        460
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Orders",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": [
+            {
+              "column": "OrderID",
+              "value": "={{$json.session.OrderID}}"
+            },
+            {
+              "column": "Date",
+              "value": "={{$now.toISO()}}"
+            },
+            {
+              "column": "Customer",
+              "value": "={{$json.name}}"
+            },
+            {
+              "column": "Phone",
+              "value": "={{$json.phone}}"
+            },
+            {
+              "column": "Address",
+              "value": "={{$json.session.Address}}"
+            },
+            {
+              "column": "Items",
+              "value": "={{$json.session.Items}}"
+            },
+            {
+              "column": "Total",
+              "value": "={{$json.session.Total}}"
+            },
+            {
+              "column": "Status",
+              "value": "Pending"
+            }
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "889cde74-566b-4fa6-8b74-38d74926cfde",
+      "name": "Notify Owner Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3640,
+        460
+      ],
+      "parameters": {
+        "sendTo": "={{$env.OWNER_EMAIL}}",
+        "subject": "=New Order {{$json.session.OrderID}}",
+        "message": "=Customer: {{$json.name}}\nPhone: {{$json.phone}}\nAddress: {{$json.session.Address}}\nItems: {{$json.session.Items}}\nTotal: Rs.{{$json.session.Total}}\nStatus: Pending",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "34888ebb-0c9c-46db-920c-2d4a310d1192",
+      "name": "Send Order Confirmed",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        3900,
+        460
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=Your order is confirmed! \u2705\nOrder Number: {{$json.session.OrderID}}\nWe'll notify you once it's out for delivery. Thank you!",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "cbb85d10-b2ff-40e6-8e84-9c8a6ec48ab2",
+      "name": "Reset Session After Order",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4160,
+        460
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": [
+            {
+              "column": "Phone",
+              "value": "={{$json.phone}}"
+            },
+            {
+              "column": "Stage",
+              "value": "NONE"
+            },
+            {
+              "column": "Items",
+              "value": ""
+            },
+            {
+              "column": "Total",
+              "value": ""
+            },
+            {
+              "column": "Address",
+              "value": ""
+            },
+            {
+              "column": "OrderID",
+              "value": ""
+            },
+            {
+              "column": "LastUpdated",
+              "value": "={{$now.toISO()}}"
+            }
+          ],
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "a8f3c8da-61e3-4263-8e75-2c54a69327ec",
+      "name": "Send Order Cancelled",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        3640,
+        780
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=No problem, your order has been cancelled. Message us anytime to start a new order! \ud83d\ude4f",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "id": "c9c2c8d4-fed5-4dea-a823-deccd0530fc9",
+      "name": "Reset Session After Cancel",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3900,
+        780
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": [
+            {
+              "column": "Phone",
+              "value": "={{$json.phone}}"
+            },
+            {
+              "column": "Stage",
+              "value": "NONE"
+            },
+            {
+              "column": "Items",
+              "value": ""
+            },
+            {
+              "column": "Total",
+              "value": ""
+            },
+            {
+              "column": "Address",
+              "value": ""
+            },
+            {
+              "column": "OrderID",
+              "value": ""
+            },
+            {
+              "column": "LastUpdated",
+              "value": "={{$now.toISO()}}"
+            }
+          ],
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "4303db22-c3e2-4f23-b65c-c63a0dc42b23",
+      "name": "Send Ask Yes No Again",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        3640,
+        920
+      ],
+      "parameters": {
+        "operationType": "message",
+        "phoneNumberId": "={{$env.PHONE_NUMBER_ID}}",
+        "recipientPhoneNumber": "={{$json.phone}}",
+        "textBody": "=Sorry, I didn't catch that. Please reply YES to confirm your order or NO to cancel.",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "2",
+          "name": "WhatsApp account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Incoming Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Incoming Message": {
+      "main": [
+        [
+          {
+            "node": "Is Text Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Text Message": {
+      "main": [
+        [
+          {
+            "node": "Get Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Session": {
+      "main": [
+        [
+          {
+            "node": "Normalize Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Session": {
+      "main": [
+        [
+          {
+            "node": "Get Working Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Working Hours": {
+      "main": [
+        [
+          {
+            "node": "Check Business Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Business Hours": {
+      "main": [
+        [
+          {
+            "node": "Is Open",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Open": {
+      "main": [
+        [
+          {
+            "node": "Is Stage New",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Closed Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Stage New": {
+      "main": [
+        [
+          {
+            "node": "Get Menu",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get FAQ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Stage Waiting Address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Stage Waiting Address": {
+      "main": [
+        [
+          {
+            "node": "Save Address And Create Order ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Stage Waiting Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Stage Waiting Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Check Confirmation Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reset Corrupted Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset Corrupted Session": {
+      "main": [
+        [
+          {
+            "node": "Send Generic Error Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Menu": {
+      "main": [
+        [
+          {
+            "node": "Build AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get FAQ": {
+      "main": [
+        [
+          {
+            "node": "Build AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Ollama": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Is Intent FAQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Intent FAQ": {
+      "main": [
+        [
+          {
+            "node": "Lookup FAQ Answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Intent Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup FAQ Answer": {
+      "main": [
+        [
+          {
+            "node": "Send FAQ Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Intent Order": {
+      "main": [
+        [
+          {
+            "node": "Validate Order And Calc Total",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Intent Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Order And Calc Total": {
+      "main": [
+        [
+          {
+            "node": "Is Order Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Order Valid": {
+      "main": [
+        [
+          {
+            "node": "Update Session Waiting Address",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Invalid Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Session Waiting Address": {
+      "main": [
+        [
+          {
+            "node": "Send Ask Address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Intent Status": {
+      "main": [
+        [
+          {
+            "node": "Extract Order ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Clarify Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Order ID": {
+      "main": [
+        [
+          {
+            "node": "Lookup Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Order": {
+      "main": [
+        [
+          {
+            "node": "Format Status Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Status Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Status Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Address And Create Order ID": {
+      "main": [
+        [
+          {
+            "node": "Update Session Waiting Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Session Waiting Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Send Order Summary Confirm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Confirmation Reply": {
+      "main": [
+        [
+          {
+            "node": "Is Confirmation Yes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Confirmation Yes": {
+      "main": [
+        [
+          {
+            "node": "Append Order To Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Confirmation No",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Order To Sheet": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Owner Email": {
+      "main": [
+        [
+          {
+            "node": "Send Order Confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Order Confirmed": {
+      "main": [
+        [
+          {
+            "node": "Reset Session After Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Confirmation No": {
+      "main": [
+        [
+          {
+            "node": "Send Order Cancelled",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Ask Yes No Again",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Order Cancelled": {
+      "main": [
+        [
+          {
+            "node": "Reset Session After Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
