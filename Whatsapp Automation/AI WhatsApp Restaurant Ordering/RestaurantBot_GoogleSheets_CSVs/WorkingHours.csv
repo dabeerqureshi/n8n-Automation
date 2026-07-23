@@ -1,0 +1,8 @@
+Day,Open,Close,AcceptOrders
+Monday,10:00,23:00,Yes
+Tuesday,10:00,23:00,Yes
+Wednesday,10:00,23:00,Yes
+Thursday,10:00,23:00,Yes
+Friday,14:00,23:30,Yes
+Saturday,10:00,23:30,Yes
+Sunday,Closed,Closed,No
