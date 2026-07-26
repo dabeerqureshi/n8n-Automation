@@ -1,0 +1,889 @@
+{
+  "name": "ABC Bank WhatsApp Banking Chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh_verify",
+      "name": "Webhook - Verify",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "wh_verify",
+      "position": [
+        -400,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $input.first().json.query || {};\nconst verifyToken = $env.WHATSAPP_VERIFY_TOKEN;\n\nif (query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === verifyToken) {\n  return [{ json: { statusCode: 200, body: query['hub.challenge'] } }];\n}\n\nreturn [{ json: { statusCode: 403, body: 'Verification failed' } }];"
+      },
+      "id": "code_verify",
+      "name": "Check Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{$json.body}}",
+        "options": {
+          "responseCode": "={{$json.statusCode}}"
+        }
+      },
+      "id": "resp_verify",
+      "name": "Respond - Verify",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        80,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh_receive",
+      "name": "Webhook - Receive",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "wh_receive",
+      "position": [
+        -400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "EVENT_RECEIVED",
+        "options": {
+          "responseCode": "200"
+        }
+      },
+      "id": "resp_ack",
+      "name": "Ack Meta (200 OK)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\n\ntry {\n  const entry = body.entry[0].changes[0].value;\n  const message = entry.messages ? entry.messages[0] : null;\n\n  if (!message) {\n    // status update (delivered/read) - nothing to reply to\n    return [{ json: { skip: true, reason: 'no_message_or_status_update' } }];\n  }\n\n  const phone = message.from;\n  const messageId = message.id;\n  const timestamp = message.timestamp;\n  let text = '';\n\n  if (message.type === 'text') {\n    text = (message.text.body || '').trim();\n  } else if (message.type === 'interactive' && message.interactive.type === 'button_reply') {\n    text = message.interactive.button_reply.id;\n  } else if (message.type === 'button') {\n    text = message.button.text;\n  } else {\n    text = '';\n  }\n\n  return [{ json: { phone, messageId, timestamp, text, msgType: message.type, skip: false } }];\n} catch (e) {\n  return [{ json: { skip: true, reason: 'parse_error', error: e.message } }];\n}"
+      },
+      "id": "code_parse",
+      "name": "Parse WhatsApp Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if_has_msg-c1",
+              "leftValue": "={{$json.skip}}",
+              "rightValue": "false",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_has_msg",
+      "name": "Has Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "noop_skip",
+      "name": "No-Op (Skip)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        320,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Phone",
+              "lookupValue": "={{$json.phone}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheet_get_session",
+      "name": "Get Session",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        320,
+        -50
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const incoming = $('Parse WhatsApp Payload').first().json;\nconst sessionRows = $input.all().map(i => i.json).filter(r => r.Phone);\nconst session = sessionRows.length ? sessionRows[0] : null;\n\nconst text = (incoming.text || '').trim();\nconst lower = text.toLowerCase();\n\nlet state = session ? session.State : 'MAIN_MENU';\nlet pinAttempts = session ? Number(session.PinAttempts || 0) : 0;\n\nconst greetings = ['hi', 'hello', 'hey', 'start', 'menu', 'hii', 'salam', 'assalamualaikum'];\n\nlet route = 'MAIN_MENU';\n\nif (!session || greetings.includes(lower)) {\n  route = 'MAIN_MENU';\n  state = 'MAIN_MENU';\n} else if (state === 'MAIN_MENU') {\n  route = ['1', '2', '3', '4'].includes(text) ? 'MENU_SELECTION' : 'INVALID';\n} else if (state === 'WAITING_PIN_BALANCE' || state === 'WAITING_PIN_STATEMENT') {\n  route = 'VALIDATE_PIN';\n} else if (state === 'WAITING_FAQ') {\n  route = 'FAQ';\n} else {\n  route = 'MAIN_MENU';\n  state = 'MAIN_MENU';\n}\n\nreturn [{\n  json: {\n    ...incoming,\n    session,\n    currentState: state,\n    pinAttempts,\n    route\n  }\n}];"
+      },
+      "id": "code_route",
+      "name": "Determine Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -50
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if_route_menu-c1",
+              "leftValue": "={{$json.route}}",
+              "rightValue": "MAIN_MENU",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_route_menu",
+      "name": "Route: Main Menu?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -50
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const routeData = $input.first().json;\nconst menuText = 'Welcome to ABC Bank \\ud83d\\udc4b\\nPlease choose an option.\\n\\n1\\ufe0f\\u20e3 Bank Balance\\n2\\ufe0f\\u20e3 Bank Statement\\n3\\ufe0f\\u20e3 FAQs\\n4\\ufe0f\\u20e3 Talk to Customer Support\\n\\nReply with the number.';\n\nreturn [{\n  json: {\n    ...routeData,\n    replyText: menuText,\n    newState: 'MAIN_MENU',\n    newLastMenu: '-',\n    newPinAttempts: 0\n  }\n}];"
+      },
+      "id": "code_main_menu",
+      "name": "Build Main Menu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if_route_selection-c1",
+              "leftValue": "={{$json.route}}",
+              "rightValue": "MENU_SELECTION",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_route_selection",
+      "name": "Route: Menu Selection?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -50
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst text = (data.text || '').trim();\n\nlet replyText = '';\nlet newState = 'MAIN_MENU';\nlet newLastMenu = '-';\n\nswitch (text) {\n  case '1':\n    replyText = 'Please enter your 4-digit PIN to check your balance.';\n    newState = 'WAITING_PIN_BALANCE';\n    newLastMenu = '1';\n    break;\n  case '2':\n    replyText = 'Please enter your 4-digit PIN to view your last statement.';\n    newState = 'WAITING_PIN_STATEMENT';\n    newLastMenu = '2';\n    break;\n  case '3':\n    replyText = 'Please type your banking question and I will do my best to help.';\n    newState = 'WAITING_FAQ';\n    newLastMenu = '3';\n    break;\n  case '4':\n    replyText = '\\ud83d\\udcde Customer Support\\n+1-800-123-4567\\nAvailable 9 AM - 5 PM';\n    newState = 'MAIN_MENU';\n    newLastMenu = '4';\n    break;\n  default:\n    replyText = 'Invalid option. Please reply with 1, 2, 3 or 4.';\n    newState = 'MAIN_MENU';\n    newLastMenu = '-';\n}\n\nreturn [{ json: { ...data, replyText, newState, newLastMenu, newPinAttempts: 0 } }];"
+      },
+      "id": "code_menu_sel",
+      "name": "Handle Menu Selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        -150
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if_route_pin-c1",
+              "leftValue": "={{$json.route}}",
+              "rightValue": "VALIDATE_PIN",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_route_pin",
+      "name": "Route: Validate PIN?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Customers",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Phone",
+              "lookupValue": "={{$('Determine Route').first().json.phone}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheet_get_customer",
+      "name": "Get Customer",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1520,
+        50
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const routeData = $('Determine Route').first().json;\nconst customerRows = $input.all().map(i => i.json).filter(r => r.Phone);\nconst customer = customerRows.find(c => String(c.Phone) === String(routeData.phone));\n\nconst enteredPin = (routeData.text || '').trim();\nconst attempts = Number(routeData.pinAttempts || 0);\nconst menu = routeData.session ? routeData.session.LastMenu : '1';\n\nlet replyText = '';\nlet newState = routeData.currentState;\nlet newPinAttempts = attempts;\nlet newLastMenu = menu;\n\nif (!customer) {\n  replyText = 'We could not find your account. Please contact customer support at +1-800-123-4567.';\n  newState = 'MAIN_MENU';\n  newPinAttempts = 0;\n} else if (String(customer.PIN) === enteredPin) {\n  if (String(menu) === '2') {\n    replyText = `Hello ${customer.Name} \\ud83d\\udc4b\\n\\nLast Statement:\\n${customer.LastStatement}\\n\\nCurrent Balance: $${customer.Balance}\\n\\nReply with:\\n1 Balance | 2 Statement | 3 FAQs | 4 Support`;\n  } else {\n    replyText = `Hello ${customer.Name} \\ud83d\\udc4b\\n\\nAvailable Balance: $${customer.Balance}\\n\\nReply with:\\n1 Balance | 2 Statement | 3 FAQs | 4 Support`;\n  }\n  newState = 'MAIN_MENU';\n  newPinAttempts = 0;\n} else {\n  newPinAttempts = attempts + 1;\n  if (newPinAttempts >= 3) {\n    replyText = 'Too many failed attempts. Please contact customer support at +1-800-123-4567.';\n    newState = 'MAIN_MENU';\n    newPinAttempts = 0;\n  } else {\n    replyText = `Incorrect PIN. Please try again. (${3 - newPinAttempts} attempt(s) left)`;\n    newState = routeData.currentState;\n  }\n}\n\nreturn [{ json: { ...routeData, replyText, newState, newLastMenu, newPinAttempts } }];"
+      },
+      "id": "code_validate_pin",
+      "name": "Validate PIN & Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        50
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if_route_faq-c1",
+              "leftValue": "={{$json.route}}",
+              "rightValue": "FAQ",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_route_faq",
+      "name": "Route: FAQ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "FAQs",
+          "mode": "name"
+        },
+        "filtersUI": {},
+        "options": {}
+      },
+      "id": "sheet_get_faqs",
+      "name": "Get All FAQs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1760,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const routeData = $('Determine Route').first().json;\nconst faqRows = $input.all().map(i => i.json).filter(r => r.Question);\nconst question = (routeData.text || '').toLowerCase();\n\nlet match = null;\nfor (const row of faqRows) {\n  const keywords = (row.Keywords || '').toLowerCase().split(',').map(k => k.trim()).filter(Boolean);\n  const questionText = (row.Question || '').toLowerCase();\n  if (keywords.some(k => k && question.includes(k)) || (questionText && question.includes(questionText))) {\n    match = row;\n    break;\n  }\n}\n\nif (match) {\n  return [{\n    json: {\n      ...routeData,\n      replyText: match.Answer,\n      newState: 'WAITING_FAQ',\n      newLastMenu: '3',\n      newPinAttempts: 0,\n      needAI: false\n    }\n  }];\n}\n\nreturn [{ json: { ...routeData, needAI: true } }];"
+      },
+      "id": "code_match_faq",
+      "name": "Match FAQ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if_need_ai-c1",
+              "leftValue": "={{$json.needAI}}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_need_ai",
+      "name": "Need AI?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.OLLAMA_URL}}/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"={{$env.OLLAMA_MODEL}}\",\n  \"prompt\": \"System: You are ABC Bank's virtual assistant.\\nRules:\\n- Never invent balances or account details.\\n- Financial information must only come from the bank system, not from you.\\n- If asked for balance or statement, tell the customer to use the numbered menu.\\n- Answer only banking-related questions.\\n- Keep responses under 80 words.\\n- If you don't know the answer, say: Please contact customer support.\\n- Never reveal or guess a user's PIN.\\n- Be polite and professional.\\n\\nCustomer question: {{$json.text}}\",\n  \"stream\": false\n}",
+        "options": {}
+      },
+      "id": "http_ollama",
+      "name": "Ask Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2480,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nlet answer = data.response ? data.response.trim() : 'Please contact customer support.';\n\nconst words = answer.split(/\\s+/);\nif (words.length > 80) {\n  answer = words.slice(0, 80).join(' ') + '...';\n}\n\nconst routeData = $('Determine Route').first().json;\n\nreturn [{\n  json: {\n    ...routeData,\n    replyText: answer,\n    newState: 'WAITING_FAQ',\n    newLastMenu: '3',\n    newPinAttempts: 0\n  }\n}];"
+      },
+      "id": "code_format_ai",
+      "name": "Format AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const routeData = $input.first().json;\n\nreturn [{\n  json: {\n    ...routeData,\n    replyText: 'Sorry, I did not understand that. Reply with \"menu\" to see options.',\n    newState: 'MAIN_MENU',\n    newLastMenu: '-',\n    newPinAttempts: 0\n  }\n}];"
+      },
+      "id": "code_invalid",
+      "name": "Build Invalid Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nreturn [{\n  json: {\n    Phone: data.phone,\n    State: data.newState,\n    LastMenu: data.newLastMenu,\n    PinAttempts: data.newPinAttempts,\n    UpdatedAt: new Date().toISOString(),\n    replyText: data.replyText\n  }\n}];"
+      },
+      "id": "code_prep_session",
+      "name": "Prepare Session Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "Phone"
+          ],
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "sheet_upsert_session",
+      "name": "Update Session",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.WHATSAPP_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"={{$json.Phone}}\",\n  \"type\": \"text\",\n  \"text\": { \"body\": \"={{$json.replyText}}\" }\n}",
+        "options": {}
+      },
+      "id": "http_send_wa",
+      "name": "Send WhatsApp Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3440,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook - Verify": {
+      "main": [
+        [
+          {
+            "node": "Check Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Verify Token": {
+      "main": [
+        [
+          {
+            "node": "Respond - Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Receive": {
+      "main": [
+        [
+          {
+            "node": "Ack Meta (200 OK)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Parse WhatsApp Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse WhatsApp Payload": {
+      "main": [
+        [
+          {
+            "node": "Has Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Message?": {
+      "main": [
+        [
+          {
+            "node": "Get Session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No-Op (Skip)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Session": {
+      "main": [
+        [
+          {
+            "node": "Determine Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Route": {
+      "main": [
+        [
+          {
+            "node": "Route: Main Menu?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Main Menu?": {
+      "main": [
+        [
+          {
+            "node": "Build Main Menu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: Menu Selection?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Menu Selection?": {
+      "main": [
+        [
+          {
+            "node": "Handle Menu Selection",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: Validate PIN?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Validate PIN?": {
+      "main": [
+        [
+          {
+            "node": "Get Customer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: FAQ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Customer": {
+      "main": [
+        [
+          {
+            "node": "Validate PIN & Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: FAQ?": {
+      "main": [
+        [
+          {
+            "node": "Get All FAQs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Invalid Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All FAQs": {
+      "main": [
+        [
+          {
+            "node": "Match FAQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match FAQ": {
+      "main": [
+        [
+          {
+            "node": "Need AI?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Session Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Need AI?": {
+      "main": [
+        [
+          {
+            "node": "Ask Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Ollama": {
+      "main": [
+        [
+          {
+            "node": "Format AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Main Menu": {
+      "main": [
+        [
+          {
+            "node": "Prepare Session Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Menu Selection": {
+      "main": [
+        [
+          {
+            "node": "Prepare Session Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate PIN & Build Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Session Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Session Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Invalid Message": {
+      "main": [
+        [
+          {
+            "node": "Prepare Session Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Session Update": {
+      "main": [
+        [
+          {
+            "node": "Update Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Session": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "abc-bank-whatsapp-bot"
+  }
+}
