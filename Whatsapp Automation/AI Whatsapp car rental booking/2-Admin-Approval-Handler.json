@@ -1,0 +1,254 @@
+{
+  "name": "2 - Admin Approval Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {"item": [{"mode": "everyMinute"}]},
+        "documentId": {"__rl": true, "value": "REPLACE_WITH_GOOGLE_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "Bookings", "mode": "name"},
+        "event": "rowUpdate",
+        "options": {}
+      },
+      "id": "trig-001",
+      "name": "Watch Bookings Sheet",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [-100, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "3", "name": "Google Sheets account"}
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [
+            {"id": "c1", "leftValue": "={{$json['Admin Approval']}}", "rightValue": "Yes", "operator": {"type": "string", "operation": "equals"}},
+            {"id": "c2", "leftValue": "={{$json['Booking Status']}}", "rightValue": "Confirmed", "operator": {"type": "string", "operation": "notEquals"}}
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-001",
+      "name": "IF Approved & Not Yet Confirmed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [140, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"},
+          "conditions": [
+            {"id": "c3", "leftValue": "={{$json['Admin Approval']}}", "rightValue": "No", "operator": {"type": "string", "operation": "equals"}},
+            {"id": "c4", "leftValue": "={{$json['Booking Status']}}", "rightValue": "Rejected", "operator": {"type": "string", "operation": "equals"}}
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-002",
+      "name": "IF Rejected & Not Notified",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [140, 480]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {"name": "Booking Status", "stringValue": "Confirmed"},
+            {"name": "Last Updated", "stringValue": "={{$now.toISO()}}"}
+          ]
+        },
+        "include": "all",
+        "options": {}
+      },
+      "id": "set-001",
+      "name": "Prepare Confirmed Update",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [420, 100]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {"__rl": true, "value": "REPLACE_WITH_GOOGLE_SHEET_ID", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "Bookings", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Booking ID"],
+          "value": {
+            "Booking ID": "={{$json['Booking ID']}}",
+            "Booking Status": "={{$json['Booking Status']}}",
+            "Last Updated": "={{$json['Last Updated']}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "gs-001",
+      "name": "Update Row - Confirmed",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [660, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "3", "name": "Google Sheets account"}
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v20.0/REPLACE_WITH_PHONE_NUMBER_ID/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"messaging_product\": \"whatsapp\", \"to\": $json['Phone'], \"type\": \"text\", \"text\": { \"body\": \"🎉 Your booking has been confirmed!\\n\\nBooking ID: \" + $json['Booking ID'] + \"\\nCar: \" + $json['Car'] + \"\\nPickup: \" + $json['Pickup Date'] + \"\\nReturn: \" + $json['Return Date'] + \"\\nTotal: \" + $json['Total Price'] + \"\\n\\nWe look forward to serving you!\" } } }}",
+        "options": {}
+      },
+      "id": "http-001",
+      "name": "WhatsApp - Confirm Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 20],
+      "credentials": {
+        "httpHeaderAuth": {"id": "2", "name": "WhatsApp Cloud API Token"}
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "bookings@cityrentals.example",
+        "toEmail": "={{$json['Email']}}",
+        "subject": "=Your booking {{$json['Booking ID']}} is confirmed",
+        "emailFormat": "text",
+        "text": "=Hi {{$json['Customer Name']}},\n\nYour booking has been confirmed!\n\nBooking ID: {{$json['Booking ID']}}\nCar: {{$json['Car']}}\nPickup: {{$json['Pickup Date']}} at {{$json['Pickup Location']}}\nReturn: {{$json['Return Date']}} at {{$json['Drop-off Location']}}\nTotal: {{$json['Total Price']}}\n\nWe look forward to serving you!",
+        "options": {}
+      },
+      "id": "mail-001",
+      "name": "Email Customer - Confirmed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [900, 180],
+      "credentials": {
+        "smtp": {"id": "4", "name": "SMTP Account"}
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "bookings@cityrentals.example",
+        "toEmail": "admin@cityrentals.example",
+        "subject": "=Booking {{$json['Booking ID']}} confirmed & customer notified",
+        "emailFormat": "text",
+        "text": "=Booking {{$json['Booking ID']}} for {{$json['Customer Name']}} has been marked Confirmed and the customer was notified via WhatsApp and email.",
+        "options": {}
+      },
+      "id": "mail-002",
+      "name": "Email Admin - Confirmed Notice",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [900, 340],
+      "credentials": {
+        "smtp": {"id": "4", "name": "SMTP Account"}
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v20.0/REPLACE_WITH_PHONE_NUMBER_ID/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"messaging_product\": \"whatsapp\", \"to\": $json['Phone'], \"type\": \"text\", \"text\": { \"body\": \"We're sorry, we were unable to confirm your booking \" + $json['Booking ID'] + \" at this time.\" + ($json['Admin Notes'] ? (\" Reason: \" + $json['Admin Notes']) : \"\") + \" Please contact us if you'd like to try different dates.\" } } }}",
+        "options": {}
+      },
+      "id": "http-002",
+      "name": "WhatsApp - Reject Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 400],
+      "credentials": {
+        "httpHeaderAuth": {"id": "2", "name": "WhatsApp Cloud API Token"}
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "bookings@cityrentals.example",
+        "toEmail": "={{$json['Email']}}",
+        "subject": "=Update on your booking request {{$json['Booking ID']}}",
+        "emailFormat": "text",
+        "text": "=Hi {{$json['Customer Name']}},\n\nWe're sorry, we were unable to confirm your booking request {{$json['Booking ID']}}.\n{{$json['Admin Notes'] ? 'Reason: ' + $json['Admin Notes'] : ''}}\n\nPlease reach out if you'd like to try different dates or vehicle.",
+        "options": {}
+      },
+      "id": "mail-003",
+      "name": "Email Customer - Rejected",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [420, 540],
+      "credentials": {
+        "smtp": {"id": "4", "name": "SMTP Account"}
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "bookings@cityrentals.example",
+        "toEmail": "admin@cityrentals.example",
+        "subject": "=Booking {{$json['Booking ID']}} rejection - customer informed",
+        "emailFormat": "text",
+        "text": "=Booking {{$json['Booking ID']}} for {{$json['Customer Name']}} was rejected and the customer has been notified via WhatsApp and email.",
+        "options": {}
+      },
+      "id": "mail-004",
+      "name": "Email Admin - Customer Informed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [420, 680],
+      "credentials": {
+        "smtp": {"id": "4", "name": "SMTP Account"}
+      }
+    },
+    {
+      "parameters": {},
+      "id": "noop-001",
+      "name": "No Action",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [420, 820]
+    }
+  ],
+  "connections": {
+    "Watch Bookings Sheet": {"main": [[{"node": "IF Approved & Not Yet Confirmed", "type": "main", "index": 0}]]},
+    "IF Approved & Not Yet Confirmed": {
+      "main": [
+        [{"node": "Prepare Confirmed Update", "type": "main", "index": 0}],
+        [{"node": "IF Rejected & Not Notified", "type": "main", "index": 0}]
+      ]
+    },
+    "Prepare Confirmed Update": {"main": [[{"node": "Update Row - Confirmed", "type": "main", "index": 0}]]},
+    "Update Row - Confirmed": {
+      "main": [
+        [
+          {"node": "WhatsApp - Confirm Customer", "type": "main", "index": 0},
+          {"node": "Email Customer - Confirmed", "type": "main", "index": 0},
+          {"node": "Email Admin - Confirmed Notice", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "IF Rejected & Not Notified": {
+      "main": [
+        [
+          {"node": "WhatsApp - Reject Customer", "type": "main", "index": 0},
+          {"node": "Email Customer - Rejected", "type": "main", "index": 0},
+          {"node": "Email Admin - Customer Informed", "type": "main", "index": 0}
+        ],
+        [{"node": "No Action", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {"executionOrder": "v1"},
+  "staticData": null,
+  "meta": {"templateCredsSetupCompleted": false},
+  "versionId": "1"
+}

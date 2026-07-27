@@ -1,0 +1,6 @@
+Booking ID,Customer Name,Phone,Email,Car,Pickup Date,Return Date,Pickup Location,Drop-off Location,Driver Required,Total Price,Booking Status,Admin Approval,Admin Notes,Created At,Last Updated
+CR-1001,John Smith,+923001234567,john@email.com,Toyota Corolla,10 Aug 2026,15 Aug 2026,Islamabad Airport,Islamabad Airport,No,225,Pending,No,,2026-07-20T09:15:00Z,2026-07-20T09:15:00Z
+CR-1002,Ayesha Khan,+923219876543,ayesha@email.com,Honda Civic,12 Aug 2026,14 Aug 2026,Blue Area F-7,Blue Area F-7,Yes,100,Confirmed,Yes,,2026-07-19T11:00:00Z,2026-07-19T13:40:00Z
+CR-1003,Bilal Ahmed,+923331122334,bilal@email.com,Suzuki Alto,05 Aug 2026,08 Aug 2026,DHA Phase 2,DHA Phase 2,No,90,Rejected,No,Vehicle unavailable for selected dates,2026-07-18T08:30:00Z,2026-07-18T10:05:00Z
+CR-1004,Sara Malik,+923451239988,sara@email.com,Toyota Hiace,20 Aug 2026,25 Aug 2026,Islamabad Airport,Lahore Airport,Yes,450,Completed,Yes,,2026-07-10T07:20:00Z,2026-07-26T18:00:00Z
+CR-1005,Usman Tariq,+923009988776,usman@email.com,Toyota Corolla,01 Aug 2026,03 Aug 2026,F-10 Markaz,F-10 Markaz,No,90,Pending,No,,2026-07-27T14:10:00Z,2026-07-27T14:10:00Z
