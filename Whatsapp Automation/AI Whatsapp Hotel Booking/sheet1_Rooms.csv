@@ -1,0 +1,5 @@
+Room ID,Room Type,Capacity,Price/Night,Facilities,Status
+R101,Deluxe,2,120,"WiFi, AC, TV",Available
+R102,Deluxe,2,120,"WiFi, AC, TV",Available
+R201,Family,4,220,"WiFi, AC, Breakfast",Available
+R301,Suite,6,400,"Pool, Kitchen, WiFi",Available

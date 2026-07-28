@@ -1,0 +1,920 @@
+{
+  "name": "ABC Hotel - WhatsApp Booking Bot (Local n8n + Ollama)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-hotel",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d607855e-f6c6-4596-94e2-e765c59a7d55",
+      "name": "Webhook - Verify",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $input.first().json.query || {};\nconst verifyToken = $env.WHATSAPP_VERIFY_TOKEN;\nif (query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === verifyToken) {\n  return [{ json: { status: 200, body: query['hub.challenge'] } }];\n}\nreturn [{ json: { status: 403, body: 'Verification failed' } }];"
+      },
+      "id": "091cc36c-8262-412a-b97a-3f20496d7688",
+      "name": "Code - Handle Verify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{$json.body}}",
+        "options": {
+          "responseCode": "={{$json.status}}"
+        }
+      },
+      "id": "08b5e888-0f5e-4ee0-bfda-5ed94c70bdb9",
+      "name": "Respond - Verify",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -760,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-hotel",
+        "responseMode": "onReceived",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "3c7323a1-2077-4c43-b20a-f912644054be",
+      "name": "Webhook - Incoming",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nlet entry, change, value, msg, contact;\ntry {\n  entry = body.entry[0];\n  change = entry.changes[0];\n  value = change.value;\n  msg = value.messages ? value.messages[0] : null;\n  contact = value.contacts ? value.contacts[0] : null;\n} catch (e) {\n  return [{ json: { valid: false } }];\n}\nif (!msg) {\n  return [{ json: { valid: false } }];\n}\nconst type = msg.type;\nlet text = '';\nif (type === 'text') text = msg.text.body;\nelse if (type === 'interactive' && msg.interactive && msg.interactive.button_reply) text = msg.interactive.button_reply.title;\nelse if (type === 'interactive' && msg.interactive && msg.interactive.list_reply) text = msg.interactive.list_reply.title;\n\nreturn [{\n  json: {\n    valid: type === 'text' || type === 'interactive',\n    type,\n    phone: msg.from,\n    name: contact ? contact.profile.name : '',\n    text: (text || '').trim(),\n    messageId: msg.id\n  }\n}];"
+      },
+      "id": "4edda190-f4d7-4d61-98cd-40dfdb7ddd56",
+      "name": "Code - Extract Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1d73894b-db48-4639-b4d1-b1d16e5642c5",
+              "leftValue": "={{$json.valid}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9eb87fcd-67fe-4d85-84d2-e4b1922ebed0",
+      "name": "IF - Is Valid Text Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "18b61edb-1b17-4ba4-ab32-4bb226e58340",
+      "name": "NoOp - Ignore Event",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_ROOMS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Rooms",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "af54a7d7-fd12-4e26-9d2b-1c25989d2f4f",
+      "name": "Get Rooms",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -560,
+        -40
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rooms = items.map(i => i.json);\nconst original = $('Code - Extract Message').first().json;\nreturn [{ json: { ...original, rooms } }];"
+      },
+      "id": "ade2b641-dfd6-4c72-b42b-a765195874e6",
+      "name": "Aggregate Rooms",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_ROOMS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "FAQs",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "7e2787cd-c95c-40ee-9c84-fc7019a8698f",
+      "name": "Get FAQs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -200,
+        -40
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const faqs = items.map(i => i.json);\nconst prev = $('Aggregate Rooms').first().json;\nreturn [{ json: { ...prev, faqs } }];"
+      },
+      "id": "b2579024-74d5-4d90-aa15-cd4895abb8f6",
+      "name": "Aggregate FAQs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_ROOMS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Phone",
+              "lookupValue": "={{$json.phone}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f6829f53-9f5a-4133-8f17-3a7d49490102",
+      "name": "Get Session",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        160,
+        -40
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const session = items.length ? items[0].json : null;\nconst prev = $('Aggregate FAQs').first().json;\nlet sessionState = 'START';\nlet sessionData = {};\nif (session && session.State) {\n  sessionState = session.State;\n  try { sessionData = JSON.parse(session.Data || '{}'); } catch(e) { sessionData = {}; }\n}\nreturn [{ json: { ...prev, sessionState, sessionData, sessionExists: !!session } }];"
+      },
+      "id": "d6b16498-6732-4223-80f3-3e347cc9efd6",
+      "name": "Aggregate Session",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = ($json.text || '').trim();\nconst lower = text.toLowerCase();\nconst rooms = $json.rooms || [];\nconst faqs = $json.faqs || [];\nlet state = $json.sessionState || 'START';\nlet data = $json.sessionData || {};\n\nconst HOTEL_NAME = $env.HOTEL_NAME || 'ABC Hotel';\n\nconst greetings = ['hi','hello','hey','salam','assalam','good morning','good evening','asalam'];\nconst isGreeting = greetings.some(g => lower === g || lower.startsWith(g + ' ') || lower.startsWith(g + ','));\n\nfunction matchFaq() {\n  for (const f of faqs) {\n    const q = (f.Question || '').toLowerCase().trim();\n    if (!q) continue;\n    if (lower.includes(q) || q.includes(lower)) return f.Answer;\n  }\n  return null;\n}\n\nlet replyText = null;\nlet needsOllama = false;\nlet ollamaPurpose = null;\nlet action = { saveBooking: false, resetSession: false };\n\nconst faqAnswer = (state === 'START' || state === 'DONE') ? matchFaq() : null;\n\nif (faqAnswer) {\n  replyText = faqAnswer;\n} else if ((state === 'START' || state === 'DONE') && isGreeting) {\n  state = 'ASK_DATES';\n  data = {};\n  replyText = \"Welcome to \" + HOTEL_NAME + \" \\n\\nI'm your virtual booking assistant.\\n\\nI can help you:\\n- Book rooms\\n- Check availability\\n- Tell room prices\\n- Explain hotel facilities\\n- Answer hotel questions\\n\\nHow many guests and what are your check-in and check-out dates?\";\n} else if (state === 'START' || state === 'DONE') {\n  state = 'ASK_DATES';\n  needsOllama = true;\n  ollamaPurpose = 'extract_dates';\n} else if (state === 'ASK_DATES') {\n  needsOllama = true;\n  ollamaPurpose = 'extract_dates';\n} else if (state === 'SHOWING_ROOMS') {\n  const offered = data.offeredRoomIds || [];\n  const upper = text.toUpperCase();\n  const picked = offered.filter(id => upper.includes(id));\n  if (picked.length === 0) {\n    replyText = \"Sorry, I didn't catch that. Please reply with the Room ID(s) you'd like, e.g. \" + offered.join(', ') + \".\";\n  } else {\n    data.selectedRoomIds = picked;\n    state = 'ASK_NAME';\n    replyText = \"Excellent choice.\\n\\nTo complete your reservation, I need a few details.\\n\\nWhat is your full name?\";\n  }\n} else if (state === 'ASK_NAME') {\n  if (!text) {\n    replyText = 'Please enter your full name.';\n  } else {\n    data.customerName = text;\n    state = 'ASK_CNIC';\n    replyText = 'Thank you. Please provide your CNIC number (e.g. 12345-1234567-1).';\n  }\n} else if (state === 'ASK_CNIC') {\n  if (!/^\\d{5}-\\d{7}-\\d{1}$/.test(text)) {\n    replyText = 'That CNIC format looks incorrect. Please use the format 12345-1234567-1.';\n  } else {\n    data.cnic = text;\n    state = 'ASK_PHONE';\n    replyText = 'Great. What is your contact phone number?';\n  }\n} else if (state === 'ASK_PHONE') {\n  if (!/^[0-9+][0-9 ]{6,}$/.test(text)) {\n    replyText = 'Please enter a valid phone number.';\n  } else {\n    data.phone = text;\n    state = 'ASK_EMAIL';\n    replyText = 'Thanks. What is your email address?';\n  }\n} else if (state === 'ASK_EMAIL') {\n  if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(text)) {\n    replyText = 'That email looks invalid. Please provide a valid email address.';\n  } else {\n    data.email = text;\n    state = 'ASK_ADDRESS';\n    replyText = 'Almost done. What is your address?';\n  }\n} else if (state === 'ASK_ADDRESS') {\n  if (!text) {\n    replyText = 'Please enter your address.';\n  } else {\n    data.address = text;\n    const nights = data.nights || 1;\n    const selectedRooms = rooms.filter(r => (data.selectedRoomIds || []).includes(r['Room ID']));\n    const total = selectedRooms.reduce((sum, r) => sum + (parseFloat(r['Price/Night']) || 0), 0) * nights;\n    data.totalPrice = total;\n    state = 'CONFIRMING';\n    const roomList = selectedRooms.map(r => r['Room ID']).join(', ');\n    replyText = \"Please review your booking:\\n\\nName: \" + data.customerName + \"\\nRooms: \" + roomList + \"\\nGuests: \" + data.guests + \"\\nCheck-in: \" + data.checkin + \"\\nCheck-out: \" + data.checkout + \"\\nTotal: $\" + total + \"\\n\\nReply YES to confirm or NO to cancel.\";\n  }\n} else if (state === 'CONFIRMING') {\n  if (/^y(es)?$/i.test(text)) {\n    action.saveBooking = true;\n    state = 'DONE';\n    replyText = null;\n  } else if (/^n(o)?$/i.test(text)) {\n    action.resetSession = true;\n    state = 'START';\n    data = {};\n    replyText = 'No problem, your booking has been cancelled. Let me know if you would like to start a new booking.';\n  } else {\n    replyText = 'Please reply YES to confirm or NO to cancel your booking.';\n  }\n} else {\n  state = 'START';\n  needsOllama = true;\n  ollamaPurpose = 'smalltalk';\n}\n\nlet ollamaMessages = null;\nif (needsOllama) {\n  const systemPrompts = {\n    extract_dates: \"You are a hotel booking assistant NLU engine for \" + HOTEL_NAME + \". Extract booking details from the guest's message and reply ONLY with strict JSON, no extra text, no markdown: {\\\"guests\\\": number|null, \\\"rooms_needed\\\": number|null, \\\"checkin\\\": \\\"YYYY-MM-DD\\\"|null, \\\"checkout\\\": \\\"YYYY-MM-DD\\\"|null, \\\"reply\\\": \\\"a short natural follow-up question if any field is missing, otherwise a short confirmation sentence\\\"}. Assume the current year is 2026 if no year is given. If the message is not about booking, set all fields null and reply naturally and professionally.\",\n    smalltalk: \"You are a friendly, professional booking assistant for \" + HOTEL_NAME + \". Reply ONLY with strict JSON, no markdown: {\\\"reply\\\": \\\"your short, professional reply\\\"}. Keep it concise and offer to help with booking, availability, prices or hotel questions.\"\n  };\n  ollamaMessages = [\n    { role: 'system', content: systemPrompts[ollamaPurpose] },\n    { role: 'user', content: text }\n  ];\n}\n\nreturn [{\n  json: {\n    ...$json,\n    state,\n    data,\n    replyText,\n    needsOllama,\n    ollamaPurpose,\n    ollamaMessages,\n    action\n  }\n}];"
+      },
+      "id": "18b300fb-376f-4b57-aae8-2f4899a97105",
+      "name": "State Router",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "b74f09ab-25fe-46fc-9c66-0c112542a03e",
+              "leftValue": "={{$json.needsOllama}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "83088920-c49a-4f91-b726-80b7e2f8d2d7",
+      "name": "IF - Needs Ollama",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        760,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.OLLAMA_URL || 'http://localhost:11434'}}/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'llama3.1', messages: $json.ollamaMessages, format: 'json', stream: false }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "c01a3f84-2328-4442-999c-9dc2761bc35e",
+      "name": "HTTP Request - Ollama Chat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let parsed = {};\ntry {\n  const content = ($json.message && $json.message.content) || $json.response || '{}';\n  parsed = JSON.parse(content);\n} catch (e) {\n  parsed = {};\n}\n\nconst prev = $('State Router').first().json;\nlet state = prev.state;\nlet data = { ...prev.data };\nlet replyText = parsed.reply || 'Sorry, could you please rephrase that?';\n\nif (prev.ollamaPurpose === 'extract_dates') {\n  if (parsed.guests) data.guests = parsed.guests;\n  if (parsed.rooms_needed) data.roomsNeeded = parsed.rooms_needed;\n  if (parsed.checkin) data.checkin = parsed.checkin;\n  if (parsed.checkout) data.checkout = parsed.checkout;\n\n  if (data.guests && data.checkin && data.checkout) {\n    const nights = Math.max(1, Math.round((new Date(data.checkout) - new Date(data.checkin)) / 86400000));\n    data.nights = nights;\n    const rooms = prev.rooms || [];\n    const available = rooms.filter(r => r.Status === 'Available');\n    if (available.length === 0) {\n      replyText = \"Thank you for your inquiry.\\n\\nUnfortunately, we don't have rooms available for those dates.\\n\\nIf your travel dates are flexible, I'd be happy to check alternative dates or suggest other available room options.\";\n      state = 'ASK_DATES';\n    } else {\n      data.offeredRoomIds = available.map(r => r['Room ID']);\n      const list = available.map(r => \"Room \" + r['Room ID'] + \"\\n\" + r['Room Type'] + \"\\n$\" + r['Price/Night'] + \"/night\\n\" + r.Facilities).join('\\n\\n');\n      replyText = \"Great news!\\n\\nWe have these rooms available:\\n\\n\" + list + \"\\n\\nWhich room(s) would you like to reserve? (reply with the Room ID)\";\n      state = 'SHOWING_ROOMS';\n    }\n  }\n}\n\nreturn [{ json: { ...prev, state, data, replyText } }];"
+      },
+      "id": "441c2a6d-db3a-4df7-897b-079398336a30",
+      "name": "Code - Parse Ollama Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let session = $json;\nlet replyText = session.replyText;\nlet state = session.state;\nlet data = session.data || {};\nlet action = session.action || {};\n\nif (action.saveBooking) {\n  const rooms = session.rooms || [];\n  const selectedRooms = rooms.filter(r => (data.selectedRoomIds || []).includes(r['Room ID']));\n  const bookingId = 'BK-' + Math.floor(1000 + Math.random() * 9000);\n  data.bookingId = bookingId;\n  replyText = \"Thank you! Your booking is confirmed.\\n\\nBooking ID: \" + bookingId + \"\\nRooms: \" + (data.selectedRoomIds || []).join(', ') + \"\\nCheck-in: \" + data.checkin + \"\\nCheck-out: \" + data.checkout + \"\\nTotal: $\" + data.totalPrice + \"\\n\\nA confirmation email has been sent. We look forward to welcoming you!\";\n}\nif (action.resetSession) {\n  data = {};\n}\n\nreturn [{ json: { ...session, replyText, state, data } }];"
+      },
+      "id": "c6adb582-2ee5-4c43-88ed-3cb4f730830c",
+      "name": "Finalize Response & Actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_ROOMS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sessions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Phone"
+          ],
+          "value": {
+            "Phone": "={{$json.phone}}",
+            "State": "={{$json.state}}",
+            "Data": "={{JSON.stringify($json.data)}}",
+            "UpdatedAt": "={{$now.toISO()}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "e315c81a-b563-43fb-b3db-36a37a3740b7",
+      "name": "Save Session",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1620,
+        -40
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "9244ba94-2d41-48fd-8019-c8e0c72aa060",
+              "leftValue": "={{$json.action.saveBooking}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0f25d433-d209-4f9a-aced-082e9c7822a5",
+      "name": "IF - Should Save Booking",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_ROOMS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Bookings",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Booking ID": "={{$json.data.bookingId}}",
+            "Customer": "={{$json.data.customerName}}",
+            "Phone": "={{$json.phone}}",
+            "Email": "={{$json.data.email}}",
+            "CNIC": "={{$json.data.cnic}}",
+            "Address": "={{$json.data.address}}",
+            "Room IDs": "={{($json.data.selectedRoomIds || []).join(', ')}}",
+            "Check In": "={{$json.data.checkin}}",
+            "Check Out": "={{$json.data.checkout}}",
+            "Guests": "={{$json.data.guests}}",
+            "Total Price": "={{$json.data.totalPrice}}",
+            "Status": "Confirmed"
+          }
+        },
+        "options": {}
+      },
+      "id": "3817c9b1-09fb-47ef-b920-9e0041dbd541",
+      "name": "Append Booking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2060,
+        -140
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const finalized = $('Finalize Response & Actions').first().json;\nconst ids = finalized.data.selectedRoomIds || [];\nreturn ids.map(id => ({ json: { roomId: id } }));"
+      },
+      "id": "08a36442-d92b-4289-ab25-caa42f31bffb",
+      "name": "Prepare Room Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2280,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_ROOMS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Rooms",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Room ID"
+          ],
+          "value": {
+            "Room ID": "={{$json.roomId}}",
+            "Status": "Booked"
+          }
+        },
+        "options": {}
+      },
+      "id": "6c9106e9-87c7-4d6c-9a2b-655925f22d3c",
+      "name": "Update Room Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2500,
+        -140
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('Finalize Response & Actions').first().json }];"
+      },
+      "id": "5537446e-b914-490c-bd99-56eed5eac07b",
+      "name": "Continue Once",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{$json.data.email}}",
+        "subject": "Hotel Booking Confirmation",
+        "message": "=Dear {{$json.data.customerName}},\n\nThank you for choosing {{$env.HOTEL_NAME || 'ABC Hotel'}}.\n\nYour reservation has been confirmed.\n\nBooking Details\nBooking ID: {{$json.data.bookingId}}\nCheck-in: {{$json.data.checkin}}\nCheck-out: {{$json.data.checkout}}\nRooms: {{($json.data.selectedRoomIds || []).join(', ')}}\nGuests: {{$json.data.guests}}\nTotal Price: ${{$json.data.totalPrice}}\n\nWe look forward to welcoming you.\n\nBest Regards\n{{$env.HOTEL_NAME || 'ABC Hotel'}}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "e455bedd-f9c3-40a4-85ec-588e41d63370",
+      "name": "Gmail - Send Customer",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2940,
+        -220
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{$env.MANAGER_EMAIL}}",
+        "subject": "New Hotel Booking",
+        "message": "=A new booking has been received.\n\nCustomer: {{$json.data.customerName}}\nPhone: {{$json.phone}}\nEmail: {{$json.data.email}}\nCNIC: {{$json.data.cnic}}\nAddress: {{$json.data.address}}\nRooms: {{($json.data.selectedRoomIds || []).join(', ')}}\nGuests: {{$json.data.guests}}\nCheck-in: {{$json.data.checkin}}\nCheck-out: {{$json.data.checkout}}\nTotal: ${{$json.data.totalPrice}}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "53726c34-35a5-4d56-8fec-ed65f9c6aba2",
+      "name": "Gmail - Send Manager",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2940,
+        -60
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.WHATSAPP_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Finalize Response & Actions').first().json.phone, type: 'text', text: { body: $('Finalize Response & Actions').first().json.replyText } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "3187e6af-80bf-43cf-a2fe-6dfd8d487518",
+      "name": "HTTP Request - Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1840,
+        180
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook - Verify": {
+      "main": [
+        [
+          {
+            "node": "Code - Handle Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Handle Verify": {
+      "main": [
+        [
+          {
+            "node": "Respond - Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Incoming": {
+      "main": [
+        [
+          {
+            "node": "Code - Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Extract Message": {
+      "main": [
+        [
+          {
+            "node": "IF - Is Valid Text Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Is Valid Text Message": {
+      "main": [
+        [
+          {
+            "node": "Get Rooms",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NoOp - Ignore Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Rooms": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Rooms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Rooms": {
+      "main": [
+        [
+          {
+            "node": "Get FAQs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get FAQs": {
+      "main": [
+        [
+          {
+            "node": "Aggregate FAQs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate FAQs": {
+      "main": [
+        [
+          {
+            "node": "Get Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Session": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Session": {
+      "main": [
+        [
+          {
+            "node": "State Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "State Router": {
+      "main": [
+        [
+          {
+            "node": "IF - Needs Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Needs Ollama": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Ollama Chat",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finalize Response & Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Ollama Chat": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Ollama Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Ollama Response": {
+      "main": [
+        [
+          {
+            "node": "Finalize Response & Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Response & Actions": {
+      "main": [
+        [
+          {
+            "node": "Save Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Session": {
+      "main": [
+        [
+          {
+            "node": "IF - Should Save Booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Should Save Booking": {
+      "main": [
+        [
+          {
+            "node": "Append Booking",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request - Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Booking": {
+      "main": [
+        [
+          {
+            "node": "Prepare Room Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Room Updates": {
+      "main": [
+        [
+          {
+            "node": "Update Room Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Room Status": {
+      "main": [
+        [
+          {
+            "node": "Continue Once",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Once": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Send Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Send Customer": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Send Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Send Manager": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
