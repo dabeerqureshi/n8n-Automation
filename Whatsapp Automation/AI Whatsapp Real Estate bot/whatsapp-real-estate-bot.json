@@ -1,0 +1,834 @@
+{
+  "name": "WhatsApp Real Estate Assistant (Local n8n + Local Ollama)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "whatsapp_verify_(get)",
+      "name": "WhatsApp Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = $input.first().json.query || {};\nconst expected = $env.WHATSAPP_VERIFY_TOKEN;\nconst ok = q['hub.mode'] === 'subscribe' && q['hub.verify_token'] === expected;\nreturn [{ json: { ok, challenge: q['hub.challenge'] || '' } }];\n"
+      },
+      "id": "check_verify_token",
+      "name": "Check Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{$json.ok ? $json.challenge : 'Forbidden'}}",
+        "options": {
+          "responseCode": "={{$json.ok ? 200 : 403}}"
+        }
+      },
+      "id": "respond_verify",
+      "name": "Respond Verify",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "options": {}
+      },
+      "id": "whatsapp_incoming_(post)",
+      "name": "WhatsApp Incoming (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the WhatsApp Cloud API webhook payload\nconst body = $input.first().json.body || $input.first().json;\nlet result = { isValidMessage: false };\n\ntry {\n  const entry = body.entry?.[0];\n  const change = entry?.changes?.[0];\n  const value = change?.value;\n  const message = value?.messages?.[0];\n  const contact = value?.contacts?.[0];\n\n  if (message && message.type === 'text') {\n    result = {\n      isValidMessage: true,\n      phone: message.from,\n      name: contact?.profile?.name || 'Customer',\n      text: message.text.body,\n      messageId: message.id,\n      timestamp: message.timestamp\n    };\n  }\n} catch (e) {\n  result = { isValidMessage: false, error: e.message };\n}\n\nreturn [{ json: result }];"
+      },
+      "id": "parse_incoming_message",
+      "name": "Parse Incoming Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{$json.isValidMessage}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if_valid_text_message",
+      "name": "If Valid Text Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{$env.DATA_DIR || '/data/whatsapp-bot'}}/memory/{{$json.phone}}.json",
+        "options": {}
+      },
+      "id": "read_memory_file",
+      "name": "Read Memory File",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build or restore the per-customer conversation memory\nconst incoming = $('Parse Incoming Message').first().json;\nlet memory = {\n  phone: incoming.phone,\n  name: incoming.name,\n  state: 'chatting',              // chatting | collecting_appointment | done\n  history: [],\n  pendingAppointment: {}\n};\n\nconst binaryItem = $input.first();\nif (binaryItem && binaryItem.binary && binaryItem.binary.data) {\n  try {\n    const buf = Buffer.from(binaryItem.binary.data.data, 'base64');\n    const saved = JSON.parse(buf.toString('utf8'));\n    memory = { ...memory, ...saved };\n  } catch (e) {\n    // no existing memory file yet - first-time customer, keep defaults\n  }\n}\n\nmemory.history.push({ role: 'customer', text: incoming.text, ts: incoming.timestamp });\n// keep only the last 10 turns to control prompt size\nmemory.history = memory.history.slice(-10);\n\nreturn [{ json: memory }];"
+      },
+      "id": "parse___init_memory",
+      "name": "Parse / Init Memory",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{$env.DATA_DIR || '/data/whatsapp-bot'}}/Properties.csv",
+        "options": {}
+      },
+      "id": "read_properties_csv",
+      "name": "Read Properties CSV",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        660,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "fromFile",
+        "options": {
+          "fileFormat": "csv"
+        }
+      },
+      "id": "properties_csv_to_json",
+      "name": "Properties CSV to JSON",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        880,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{$env.DATA_DIR || '/data/whatsapp-bot'}}/FAQs.csv",
+        "options": {}
+      },
+      "id": "read_faqs_csv",
+      "name": "Read FAQs CSV",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        660,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "fromFile",
+        "options": {
+          "fileFormat": "csv"
+        }
+      },
+      "id": "faqs_csv_to_json",
+      "name": "FAQs CSV to JSON",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        880,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.OLLAMA_URL || 'http://localhost:11434'}}/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3:4b', prompt: `You are the intent-extraction module for a real estate WhatsApp assistant.\nConversation so far (most recent last): {{ JSON.stringify($json.history) }}\nLatest customer message: \"{{ $json.history[$json.history.length - 1].text }}\"\nCurrent conversation state: {{ $json.state }}\nAlready collected appointment info: {{ JSON.stringify($json.pendingAppointment) }}\n\nReply with ONLY a compact JSON object, no extra text, matching exactly this shape:\n{\n  \"intent\": \"greeting|property_search|faq|book_visit|provide_appointment_info|other\",\n  \"property_filters\": {\"city\":\"\",\"society\":\"\",\"phase\":\"\",\"property_type\":\"\",\"size\":\"\",\"max_price\":\"\"},\n  \"faq_question\": \"\",\n  \"appointment_info\": {\"name\":\"\",\"phone\":\"\",\"email\":\"\",\"preferred_date\":\"\",\"preferred_time\":\"\",\"property_id\":\"\",\"property_title\":\"\"},\n  \"wants_visit\": false\n}\nOnly fill fields you are confident about from the message; leave others as empty strings. Do not invent data.`, stream: false, format: 'json' }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "ollama:_understand_message",
+      "name": "Ollama: Understand Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const memory = $('Parse / Init Memory').first().json;\nlet parsed = {\n  intent: 'other',\n  property_filters: {},\n  faq_question: '',\n  appointment_info: {},\n  wants_visit: false\n};\n\ntry {\n  const raw = $input.first().json.response;\n  parsed = { ...parsed, ...JSON.parse(raw) };\n} catch (e) {\n  // model returned non-JSON text - fall back to a generic chat intent\n  parsed.intent = 'other';\n}\n\nreturn [{ json: { ...memory, understanding: parsed } }];"
+      },
+      "id": "parse_understanding",
+      "name": "Parse Understanding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pulls together memory, extracted understanding, and reference data (properties/faqs)\n// to decide what the bot should do next, and prepares the data block for the reply prompt.\nconst data = $input.first().json;\nconst understanding = data.understanding;\nconst properties = $('Properties CSV to JSON').all().map(i => i.json);\nconst faqs = $('FAQs CSV to JSON').all().map(i => i.json);\n\nlet action = 'general_chat';\nlet dataBlock = '';\nlet pendingAppointment = { ...data.pendingAppointment };\nlet state = data.state;\n\nfunction norm(v) { return (v || '').toString().trim().toLowerCase(); }\n\nif (data.state === 'collecting_appointment' || understanding.intent === 'provide_appointment_info' || understanding.wants_visit) {\n  // merge any newly extracted fields into what we already have\n  const info = understanding.appointment_info || {};\n  for (const k of ['name','phone','email','preferred_date','preferred_time','property_id','property_title']) {\n    if (info[k]) pendingAppointment[k] = info[k];\n  }\n  const required = ['name','phone','email','preferred_date','preferred_time'];\n  const missing = required.filter(k => !pendingAppointment[k]);\n\n  if (missing.length === 0) {\n    action = 'appointment_complete';\n    state = 'chatting';\n  } else {\n    action = 'collect_appointment_info';\n    state = 'collecting_appointment';\n    dataBlock = 'Still missing: ' + missing.join(', ');\n  }\n} else if (understanding.intent === 'property_search') {\n  const f = understanding.property_filters || {};\n  const matches = properties.filter(p => {\n    if (norm(p['Status']) !== 'available') return false;\n    if (f.city && norm(p['City']) !== norm(f.city)) return false;\n    if (f.society && !norm(p['Society']).includes(norm(f.society))) return false;\n    if (f.phase && !norm(p['Phase']).includes(norm(f.phase))) return false;\n    if (f.property_type && !norm(p['Property Type']).includes(norm(f.property_type))) return false;\n    if (f.size && !norm(p['Size']).includes(norm(f.size))) return false;\n    return true;\n  }).slice(0, 5);\n  action = 'send_property_list';\n  dataBlock = JSON.stringify(matches);\n} else if (understanding.intent === 'faq') {\n  const q = norm(understanding.faq_question || data.history[data.history.length - 1].text);\n  let best = null, bestScore = 0;\n  for (const f of faqs) {\n    const words = norm(f['Question']).split(/\\s+/);\n    const score = words.filter(w => q.includes(w)).length;\n    if (score > bestScore) { bestScore = score; best = f; }\n  }\n  action = 'send_faq_answer';\n  dataBlock = best ? JSON.stringify(best) : 'No exact FAQ match found - answer generally and offer to connect the customer with an agent.';\n} else if (understanding.intent === 'greeting') {\n  action = 'greeting';\n} else {\n  action = 'general_chat';\n}\n\nreturn [{ json: { ...data, action, dataBlock, pendingAppointment, state } }];"
+      },
+      "id": "build_context_&_decide_action",
+      "name": "Build Context & Decide Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.OLLAMA_URL || 'http://localhost:11434'}}/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3:4b', prompt: `You are an experienced, friendly real estate consultant chatting with a customer on WhatsApp for ABC Real Estate.\n\nRules:\n- Never invent properties or facts. Only use the data provided below.\n- Keep the reply concise, warm, and conversational (2-5 sentences, WhatsApp style).\n- Never mention Google Sheets, CSV files, n8n, Ollama, or any internal system.\n- If action is \"send_property_list\": present the properties naturally, highlighting 1-2 standout features each. If the data block is an empty array, say no exact matches were found and ask a clarifying question (budget, size, location).\n- If action is \"send_faq_answer\": answer using the provided FAQ data in your own words.\n- If action is \"collect_appointment_info\": politely ask only for the specific missing fields listed.\n- If action is \"appointment_complete\": warmly confirm the visit has been scheduled using the collected details.\n- If action is \"greeting\": welcome the customer and ask what kind of property they are looking for.\n- If action is \"general_chat\": respond helpfully and steer the conversation toward finding the right property.\n\nAction: {{ $json.action }}\nData: {{ $json.dataBlock }}\nRecent conversation: {{ JSON.stringify($json.history) }}\nCollected appointment info so far: {{ JSON.stringify($json.pendingAppointment) }}\n\nReply with ONLY the plain WhatsApp message text, nothing else.`, stream: false }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "ollama:_generate_reply",
+      "name": "Ollama: Generate Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Context & Decide Action').first().json;\nlet replyText = ($input.first().json.response || '').trim();\nif (!replyText) {\n  replyText = \"Sorry, could you please repeat that? I want to make sure I get you the right information.\";\n}\nctx.history.push({ role: 'bot', text: replyText, ts: Date.now() });\nctx.history = ctx.history.slice(-10);\nreturn [{ json: { ...ctx, replyText } }];"
+      },
+      "id": "parse_reply",
+      "name": "Parse Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.WHATSAPP_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.phone, type: 'text', text: { body: $json.replyText } }) }}",
+        "options": {}
+      },
+      "id": "send_whatsapp_reply",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{$json.action}}",
+              "rightValue": "appointment_complete",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if_appointment_complete",
+      "name": "If Appointment Complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{$env.DATA_DIR || '/data/whatsapp-bot'}}/Appointments.csv",
+        "options": {}
+      },
+      "id": "read_appointments_csv",
+      "name": "Read Appointments CSV",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "fromFile",
+        "options": {
+          "fileFormat": "csv"
+        }
+      },
+      "id": "appointments_csv_to_json",
+      "name": "Appointments CSV to JSON",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Parse Reply').first().json;\nconst existing = $input.all().map(i => i.json);\nconst nextNum = existing.length + 1;\nconst apptId = 'APT-' + String(nextNum).padStart(5, '0');\nconst p = ctx.pendingAppointment;\n\nconst newRow = {\n  'Appointment ID': apptId,\n  'Date Created': new Date().toISOString().slice(0, 10),\n  'Customer Name': p.name || '',\n  'Phone': p.phone || ctx.phone,\n  'Email': p.email || '',\n  'Preferred Visit Date': p.preferred_date || '',\n  'Preferred Time': p.preferred_time || '',\n  'Property ID': p.property_id || '',\n  'Property Title': p.property_title || '',\n  'Status': 'Pending',\n  'Agent Assigned': '',\n  'Notes': ''\n};\n\nconst allRows = [...existing, newRow];\nreturn allRows.map(r => ({ json: r }));"
+      },
+      "id": "append_appointment_row",
+      "name": "Append Appointment Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "options": {
+          "fileFormat": "csv"
+        }
+      },
+      "id": "appointments_json_to_csv",
+      "name": "Appointments JSON to CSV",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{$env.DATA_DIR || '/data/whatsapp-bot'}}/Appointments.csv",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "write_appointments_csv",
+      "name": "Write Appointments CSV",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        3520,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Parse Reply').first().json;\nconst rows = $('Append Appointment Row').all().map(i => i.json);\nconst last = rows[rows.length - 1];\nreturn [{ json: { ...ctx, appointment: last } }];\n"
+      },
+      "id": "prepare_confirmation_data",
+      "name": "Prepare Confirmation Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.SMTP_FROM_EMAIL}}",
+        "toEmail": "={{$json.appointment['Email']}}",
+        "subject": "Property Viewing Appointment Confirmation",
+        "emailFormat": "text",
+        "text": "=Hello {{$json.appointment['Customer Name']}},\n\nThank you for choosing ABC Real Estate.\n\nYour property viewing appointment has been received.\n\nProperty: {{$json.appointment['Property Title']}}\nVisit Date: {{$json.appointment['Preferred Visit Date']}}\nTime: {{$json.appointment['Preferred Time']}}\nReference: {{$json.appointment['Appointment ID']}}\n\nOur representative will contact you shortly.\n\nThank you.",
+        "options": {}
+      },
+      "id": "email_customer",
+      "name": "Email Customer",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        3960,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.SMTP_FROM_EMAIL}}",
+        "toEmail": "={{$env.ADMIN_EMAIL}}",
+        "subject": "=New Appointment - {{$json.appointment['Appointment ID']}}",
+        "emailFormat": "text",
+        "text": "=New appointment booked.\n\nCustomer: {{$json.appointment['Customer Name']}}\nPhone: {{$json.appointment['Phone']}}\nEmail: {{$json.appointment['Email']}}\nProperty: {{$json.appointment['Property Title']}} ({{$json.appointment['Property ID']}})\nVisit: {{$json.appointment['Preferred Visit Date']}} at {{$json.appointment['Preferred Time']}}\nReference: {{$json.appointment['Appointment ID']}}",
+        "options": {}
+      },
+      "id": "email_admin",
+      "name": "Email Admin",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        3960,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.WHATSAPP_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.appointment['Phone'], type: 'text', text: { body: 'Thank you, ' + $json.appointment['Customer Name'] + '! Your property viewing appointment (' + $json.appointment['Appointment ID'] + ') has been scheduled for ' + $json.appointment['Preferred Visit Date'] + ' at ' + $json.appointment['Preferred Time'] + '. Our consultant will contact you shortly to confirm. Have a wonderful day!' } }) }}",
+        "options": {}
+      },
+      "id": "send_whatsapp_confirmation",
+      "name": "Send WhatsApp Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $json.appointment\n  ? { ...($('Parse Reply').first().json), pendingAppointment: {}, state: 'chatting' }\n  : $('Parse Reply').first().json;\n\nconst memoryToSave = {\n  phone: ctx.phone,\n  name: ctx.name,\n  state: ctx.state,\n  history: ctx.history,\n  pendingAppointment: ctx.pendingAppointment\n};\n\nconst buf = Buffer.from(JSON.stringify(memoryToSave, null, 2), 'utf8');\nreturn [{\n  json: { phone: ctx.phone },\n  binary: {\n    data: {\n      data: buf.toString('base64'),\n      mimeType: 'application/json',\n      fileName: ctx.phone + '.json'\n    }\n  }\n}];"
+      },
+      "id": "prepare_memory_to_save",
+      "name": "Prepare Memory To Save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{$env.DATA_DIR || '/data/whatsapp-bot'}}/memory/{{$json.phone}}.json",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "write_memory_file",
+      "name": "Write Memory File",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "WhatsApp Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Check Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Verify Token": {
+      "main": [
+        [
+          {
+            "node": "Respond Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Incoming (POST)": {
+      "main": [
+        [
+          {
+            "node": "Parse Incoming Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Incoming Message": {
+      "main": [
+        [
+          {
+            "node": "If Valid Text Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Valid Text Message": {
+      "main": [
+        [
+          {
+            "node": "Read Memory File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Properties CSV",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read FAQs CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Memory File": {
+      "main": [
+        [
+          {
+            "node": "Parse / Init Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Properties CSV": {
+      "main": [
+        [
+          {
+            "node": "Properties CSV to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read FAQs CSV": {
+      "main": [
+        [
+          {
+            "node": "FAQs CSV to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse / Init Memory": {
+      "main": [
+        [
+          {
+            "node": "Ollama: Understand Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama: Understand Message": {
+      "main": [
+        [
+          {
+            "node": "Parse Understanding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Understanding": {
+      "main": [
+        [
+          {
+            "node": "Build Context & Decide Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context & Decide Action": {
+      "main": [
+        [
+          {
+            "node": "Ollama: Generate Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama: Generate Reply": {
+      "main": [
+        [
+          {
+            "node": "Parse Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Reply": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Reply": {
+      "main": [
+        [
+          {
+            "node": "If Appointment Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Appointment Complete": {
+      "main": [
+        [
+          {
+            "node": "Read Appointments CSV",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Memory To Save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Appointments CSV": {
+      "main": [
+        [
+          {
+            "node": "Appointments CSV to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointments CSV to JSON": {
+      "main": [
+        [
+          {
+            "node": "Append Appointment Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Appointment Row": {
+      "main": [
+        [
+          {
+            "node": "Appointments JSON to CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointments JSON to CSV": {
+      "main": [
+        [
+          {
+            "node": "Write Appointments CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Appointments CSV": {
+      "main": [
+        [
+          {
+            "node": "Prepare Confirmation Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Confirmation Data": {
+      "main": [
+        [
+          {
+            "node": "Email Customer",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Customer": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Admin": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Prepare Memory To Save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Memory To Save": {
+      "main": [
+        [
+          {
+            "node": "Write Memory File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
