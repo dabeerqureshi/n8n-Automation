@@ -1,0 +1,11 @@
+Product ID,Product Name,Category,Brand,Price,Discount,Final Price,Stock,SKU,Status
+P001,iPhone 16 Pro 256GB,Smartphones,Apple,1199,5%,1139.05,15,APP-IP16P-256,Active
+P002,Samsung Galaxy S26,Smartphones,Samsung,999,10%,899.10,22,SAM-S26,Active
+P003,Sony WH-1000XM6,Headphones,Sony,399,15%,339.15,30,SON-WH1000XM6,Active
+P004,Apple Watch Series 11,Smart Watch,Apple,499,8%,459.08,18,APP-W11,Active
+P005,Logitech MX Master 4,Accessories,Logitech,129,5%,122.55,45,LOG-MX4,Active
+P006,Dell XPS 15 Laptop,Laptops,Dell,1499,10%,1349.10,10,DEL-XPS15,Active
+P007,Google Pixel 10,Smartphones,Google,899,7%,835.07,20,GOO-PIX10,Active
+P008,Bose QuietComfort Ultra,Headphones,Bose,349,12%,307.12,25,BOS-QCU,Active
+P009,Anker 20000mAh Power Bank,Accessories,Anker,59,0%,59.00,60,ANK-PB20K,Active
+P010,Samsung 55" 4K Smart TV,Televisions,Samsung,699,20%,559.20,8,SAM-TV55,Active

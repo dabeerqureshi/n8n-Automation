@@ -1,0 +1,1141 @@
+{
+  "name": "AI E-Commerce WhatsApp Assistant (Ollama + Google Sheets/CSV)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "Webhook_Verify_(GET)",
+      "name": "Webhook Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// >>> EDIT THIS: must match the \"Verify Token\" you set in the Meta App dashboard\nconst VERIFY_TOKEN = 'my-secret-verify-token';\n\nconst q = $input.first().json.query || {};\nconst mode = q['hub.mode'];\nconst token = q['hub.verify_token'];\nconst challenge = q['hub.challenge'];\n\nif (mode === 'subscribe' && token === VERIFY_TOKEN) {\n  return [{ json: { ok: true, challenge: challenge || '' } }];\n}\nreturn [{ json: { ok: false, challenge: '' } }];\n"
+      },
+      "id": "Check_Verify_Token",
+      "name": "Check Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{$json.challenge}}",
+        "options": {
+          "responseCode": "={{$json.ok ? 200 : 403}}"
+        }
+      },
+      "id": "Respond_Verify",
+      "name": "Respond Verify",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "onReceived",
+        "responseData": "success",
+        "options": {}
+      },
+      "id": "Webhook_Receive_(POST)",
+      "name": "Webhook Receive (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// =======================================================================\n// CONFIG - edit these values for your setup, everything else reads them\n// =======================================================================\nconst CONFIG = {\n  whatsappToken: 'PASTE_YOUR_WHATSAPP_CLOUD_API_PERMANENT_TOKEN_HERE',\n  phoneNumberId: 'PASTE_YOUR_WHATSAPP_PHONE_NUMBER_ID_HERE',\n  graphApiVersion: 'v20.0',\n  ollamaUrl: 'http://localhost:11434/api/chat',\n  ollamaModel: 'llama3.1:8b',\n  dataDir: '/data',\n  adminEmail: 'admin@smartstore.com',\n  rateLimitMax: 8,          // max messages per phone per rate limit window\n  rateLimitWindowMs: 60000, // 1 minute\n  currency: 'USD'\n};\n\nconst body = $input.first().json.body || {};\n\ntry {\n  const entry = (body.entry && body.entry[0]) || null;\n  const change = (entry && entry.changes && entry.changes[0]) || null;\n  const value = (change && change.value) || null;\n\n  if (!value) {\n    return [{ json: { skip: true, reason: 'no_value', config: CONFIG } }];\n  }\n\n  // Statuses (delivered/read receipts) have no \"messages\" array - ignore them\n  const messages = value.messages;\n  if (!messages || messages.length === 0) {\n    return [{ json: { skip: true, reason: 'status_update', config: CONFIG } }];\n  }\n\n  const msg = messages[0];\n  const contact = (value.contacts && value.contacts[0]) || {};\n  const fromPhone = msg.from || contact.wa_id || '';\n  const messageId = msg.id || ('no-id-' + Date.now());\n  const timestamp = msg.timestamp || String(Math.floor(Date.now() / 1000));\n  const profileName = (contact.profile && contact.profile.name) || 'Customer';\n\n  let text = '';\n  let messageType = msg.type || 'unknown';\n\n  if (msg.type === 'text' && msg.text && typeof msg.text.body === 'string') {\n    text = msg.text.body;\n  } else if (msg.type === 'button' && msg.button && msg.button.text) {\n    text = msg.button.text;\n  } else if (msg.type === 'interactive' && msg.interactive) {\n    if (msg.interactive.button_reply) text = msg.interactive.button_reply.title || '';\n    else if (msg.interactive.list_reply) text = msg.interactive.list_reply.title || '';\n  } else {\n    // images, audio, location, documents, unsupported types etc.\n    text = '';\n  }\n\n  if (!fromPhone) {\n    return [{ json: { skip: true, reason: 'no_phone', config: CONFIG } }];\n  }\n\n  return [{\n    json: {\n      skip: false,\n      config: CONFIG,\n      phone: fromPhone,\n      messageId,\n      timestamp,\n      profileName,\n      messageType,\n      text: (text || '').trim(),\n      textUpper: (text || '').trim().toUpperCase()\n    }\n  }];\n} catch (err) {\n  return [{ json: { skip: true, reason: 'parse_error', error: err.message, config: CONFIG } }];\n}\n"
+      },
+      "id": "Parse_Message",
+      "name": "Parse Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{$json.skip}}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "IF_Has_Message",
+      "name": "IF Has Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "NoOp_Skip",
+      "name": "NoOp Skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        660,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\n\nif (!staticData.processedIds) staticData.processedIds = [];\nif (!staticData.rateLimits) staticData.rateLimits = {};\nif (!staticData.sessions) staticData.sessions = {};\n\nconst phone = item.phone;\nconst messageId = item.messageId;\nconst now = Date.now();\nconst cfg = item.config;\n\n// ---- Duplicate detection (WhatsApp can resend the same webhook) ----\nlet isDuplicate = staticData.processedIds.includes(messageId);\nif (!isDuplicate) {\n  staticData.processedIds.push(messageId);\n  // keep memory bounded\n  if (staticData.processedIds.length > 500) {\n    staticData.processedIds = staticData.processedIds.slice(-500);\n  }\n}\n\n// ---- Rate limiting per phone number ----\nlet isRateLimited = false;\nif (!isDuplicate) {\n  const windowMs = (cfg && cfg.rateLimitWindowMs) || 60000;\n  const maxMsgs = (cfg && cfg.rateLimitMax) || 8;\n  const history = (staticData.rateLimits[phone] || []).filter(ts => now - ts < windowMs);\n  history.push(now);\n  staticData.rateLimits[phone] = history;\n  isRateLimited = history.length > maxMsgs;\n}\n\n// ---- Session (per phone) ----\nif (!staticData.sessions[phone]) {\n  staticData.sessions[phone] = {\n    state: 'idle',\n    cart: [],\n    appliedCoupon: null,\n    lastIntent: null,\n    handoffToHuman: false,\n    createdAt: now\n  };\n}\nconst session = staticData.sessions[phone];\nsession.lastSeen = now;\n\nreturn [{\n  json: {\n    ...item,\n    isDuplicate,\n    isRateLimited,\n    session\n  }\n}];\n"
+      },
+      "id": "Session_Dedup_RateLimit",
+      "name": "Session Dedup RateLimit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{$json.isDuplicate}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "IF_Duplicate",
+      "name": "IF Duplicate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "NoOp_Duplicate",
+      "name": "NoOp Duplicate",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "r1",
+              "leftValue": "={{$json.isRateLimited}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "IF_Rate_Limited",
+      "name": "IF Rate Limited",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nreturn [{ json: { ...item, replyText: \"You're sending messages too quickly. Please wait a moment and try again.\" } }];\n"
+      },
+      "id": "Build_Rate_Limit_Msg",
+      "name": "Build Rate Limit Msg",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst fs = require('fs');\nconst path = require('path');\nconst DATA_DIR = '/data';\n\nfunction splitCSVLine(line) {\n  const result = [];\n  let cur = '';\n  let inQuotes = false;\n  for (let i = 0; i < line.length; i++) {\n    const c = line[i];\n    if (c === '\"') {\n      if (inQuotes && line[i + 1] === '\"') { cur += '\"'; i++; }\n      else { inQuotes = !inQuotes; }\n    } else if (c === ',' && !inQuotes) {\n      result.push(cur); cur = '';\n    } else {\n      cur += c;\n    }\n  }\n  result.push(cur);\n  return result.map(v => v.trim());\n}\n\nfunction parseCSV(content) {\n  if (!content) return [];\n  const lines = content.split(/\\r?\\n/).filter(l => l.length > 0);\n  if (lines.length === 0) return [];\n  const headers = splitCSVLine(lines[0]);\n  const rows = [];\n  for (let i = 1; i < lines.length; i++) {\n    const vals = splitCSVLine(lines[i]);\n    const obj = {};\n    headers.forEach((h, idx) => { obj[h] = vals[idx] !== undefined ? vals[idx] : ''; });\n    rows.push(obj);\n  }\n  return rows;\n}\n\nfunction toCSVValue(v) {\n  v = (v === undefined || v === null) ? '' : String(v);\n  if (v.includes(',') || v.includes('\"') || v.includes('\\n')) {\n    v = '\"' + v.replace(/\"/g, '\"\"') + '\"';\n  }\n  return v;\n}\n\nfunction rowsToCSV(rows, headers) {\n  const lines = [headers.join(',')];\n  rows.forEach(r => { lines.push(headers.map(h => toCSVValue(r[h])).join(',')); });\n  return lines.join('\\n') + '\\n';\n}\n\nfunction readTable(filename) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    if (!fs.existsSync(filePath)) return { rows: [], headers: [] };\n    const content = fs.readFileSync(filePath, 'utf8');\n    const rows = parseCSV(content);\n    const headers = rows.length > 0 ? Object.keys(rows[0]) : (content.split(/\\r?\\n/)[0] || '').split(',').map(h => h.trim());\n    return { rows, headers };\n  } catch (e) {\n    return { rows: [], headers: [], error: e.message };\n  }\n}\n\nfunction writeTable(filename, rows, headers) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    fs.writeFileSync(filePath, rowsToCSV(rows, headers), 'utf8');\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\nfunction appendLog(filename, row, headers) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    let existed = fs.existsSync(filePath);\n    const line = headers.map(h => toCSVValue(row[h])).join(',') + '\\n';\n    if (!existed) {\n      fs.writeFileSync(filePath, headers.join(',') + '\\n' + line, 'utf8');\n    } else {\n      fs.appendFileSync(filePath, line, 'utf8');\n    }\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\nconst item = $input.first().json;\nconst text = item.text || '';\nconst textUpper = item.textUpper || '';\nconst session = item.session;\n\n// ---- Load all reference tables (cheap - small CSVs) ----\nconst products = readTable('products.csv').rows;\nconst faqs = readTable('faqs.csv').rows;\nconst orders = readTable('orders.csv').rows;\nconst tracking = readTable('tracking.csv').rows;\nconst coupons = readTable('coupons.csv').rows;\nconst shipping = readTable('shipping.csv').rows;\nconst settings = readTable('settings.csv').rows;\n\nconst settingsMap = {};\nsettings.forEach(s => { settingsMap[s['Setting']] = s['Value']; });\n\nlet route = 'fallback';\nlet routeData = {};\n\n// ---------------- Command detection (deterministic, highest priority) ----------------\nif (/^(MENU|HI|HELLO|HEY|START|HI THERE)$/i.test(text.trim())) {\n  route = 'menu';\n\n} else if (/^TRACK\\s+/i.test(text.trim())) {\n  const orderId = text.trim().split(/\\s+/)[1] || '';\n  route = 'track';\n  routeData = { orderId: orderId.toUpperCase() };\n\n} else if (/^(HUMAN|AGENT|SUPPORT|TALK TO (A )?(HUMAN|AGENT))$/i.test(text.trim())) {\n  route = 'human';\n\n} else if (/^(CART\\s+ADD|ADD)\\s+/i.test(text.trim())) {\n  const parts = text.trim().split(/\\s+/);\n  const isCartAdd = /^CART$/i.test(parts[0]);\n  const pid = isCartAdd ? parts[2] : parts[1];\n  const qtyRaw = isCartAdd ? parts[3] : parts[2];\n  const qty = parseInt(qtyRaw, 10);\n  route = 'cart_add';\n  routeData = { productId: (pid || '').toUpperCase(), qty: isNaN(qty) || qty < 1 ? 1 : qty };\n\n} else if (/^(CART|VIEW CART|MY CART)$/i.test(text.trim())) {\n  route = 'cart_view';\n\n} else if (/^(CLEAR CART|EMPTY CART)$/i.test(text.trim())) {\n  route = 'cart_clear';\n\n} else if (/^CHECKOUT/i.test(text.trim())) {\n  route = 'checkout';\n\n} else if (/^COUPON\\s+/i.test(text.trim())) {\n  const code = text.trim().split(/\\s+/)[1] || '';\n  route = 'coupon';\n  routeData = { code: code.toUpperCase() };\n\n} else if (text.trim().length === 0) {\n  // non-text message (image, sticker, location, etc.)\n  route = 'fallback';\n\n} else {\n  // ---------------- Not a command: try FAQ keyword match first ----------------\n  const lowerText = text.toLowerCase();\n  let bestFaq = null;\n  let bestScore = 0;\n  faqs.forEach(f => {\n    const kws = (f['Keywords'] || '').split('|').map(k => k.trim().toLowerCase()).filter(Boolean);\n    let score = 0;\n    kws.forEach(k => { if (k && lowerText.includes(k)) score++; });\n    if (score > bestScore) { bestScore = score; bestFaq = f; }\n  });\n\n  if (bestFaq && bestScore > 0) {\n    route = 'faq';\n    routeData = { matchedFaq: bestFaq };\n  } else {\n    // ---------------- Try product/category keyword match ----------------\n    const productWords = new Set();\n    products.forEach(p => {\n      (p['Category'] || '').toLowerCase().split(/\\s+/).forEach(w => w && productWords.add(w));\n      (p['Brand'] || '').toLowerCase().split(/\\s+/).forEach(w => w && productWords.add(w));\n      (p['Product Name'] || '').toLowerCase().split(/\\s+/).forEach(w => w && productWords.add(w));\n    });\n    const shoppingHints = ['buy', 'price', 'cost', 'recommend', 'looking for', 'show me', 'have', 'available', 'stock', 'compare'];\n    const words = lowerText.split(/\\W+/).filter(Boolean);\n    const hasProductWord = words.some(w => productWords.has(w));\n    const hasShoppingHint = shoppingHints.some(h => lowerText.includes(h));\n\n    if (hasProductWord || hasShoppingHint) {\n      route = 'product_search';\n    } else {\n      route = 'fallback';\n    }\n  }\n}\n\nreturn [{\n  json: {\n    ...item,\n    route,\n    routeData,\n    tables: { products, faqs, orders, tracking, coupons, shipping },\n    settingsMap\n  }\n}];\n"
+      },
+      "id": "Load_Data_&_Route",
+      "name": "Load Data & Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "m1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "menu",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "menu"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "t1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "track",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "track"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "h1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "human",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "human"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "ca1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "cart_add",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "cart_add"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "cv1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "cart_view",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "cart_view"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "cc1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "cart_clear",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "cart_clear"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "co1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "checkout",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "checkout"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "cp1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "coupon",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "coupon"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "ps1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "product_search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "product_search"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "f1",
+                    "leftValue": "={{$json.route}}",
+                    "rightValue": "faq",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "faq"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "Switch_Route",
+      "name": "Switch Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst name = item.profileName || 'there';\nconst biz = (item.settingsMap && item.settingsMap['Business Name']) || 'our store';\nconst text = `Hi ${name}! Welcome to ${biz} \ud83d\udc4b\n\nHere's what I can help with:\n\u2022 Type a product name or category (e.g. \"wireless headphones\") to search\n\u2022 *CART ADD <ProductID> <Qty>* - add an item, e.g. CART ADD P003 1\n\u2022 *CART* - view your cart\n\u2022 *CLEAR CART* - empty your cart\n\u2022 *COUPON <CODE>* - apply a discount code\n\u2022 *CHECKOUT* - place your order\n\u2022 *TRACK <OrderID>* - track an existing order, e.g. TRACK ORD001\n\u2022 *HUMAN* - talk to a real person\n\u2022 Ask any question (delivery, returns, warranty, payment...)`;\nreturn [{ json: { ...item, replyText: text } }];\n"
+      },
+      "id": "Handle_Menu",
+      "name": "Handle Menu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst orderId = (item.routeData && item.routeData.orderId) || '';\nconst orders = item.tables.orders || [];\nconst tracking = item.tables.tracking || [];\n\nif (!orderId) {\n  return [{ json: { ...item, replyText: \"Please include your order ID, e.g. TRACK ORD001\" } }];\n}\n\nconst order = orders.find(o => (o['Order ID'] || '').toUpperCase() === orderId);\nif (!order) {\n  return [{ json: { ...item, replyText: `I couldn't find an order with ID ${orderId}. Please double-check the order number.` } }];\n}\n\nconst trk = tracking.find(t => (t['Order ID'] || '').toUpperCase() === orderId);\n\nlet text = `\ud83d\udce6 Order ${order['Order ID']}\\nProduct: ${order['Product Name']}\\nQty: ${order['Qty']}\\nTotal: ${item.settingsMap['Currency'] || ''} ${order['Total']}\\nStatus: ${order['Order Status']}\\nShipping: ${order['Shipping Status']}`;\n\nif (trk) {\n  text += `\\n\\nCourier: ${trk['Courier']}\\nTracking #: ${trk['Tracking Number']}\\nCurrent Status: ${trk['Current Status']}\\nUpdated: ${trk['Last Updated']}`;\n}\n\nreturn [{ json: { ...item, replyText: text } }];\n"
+      },
+      "id": "Handle_Track",
+      "name": "Handle Track",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nitem.session.handoffToHuman = true;\nitem.session.state = 'human';\nconst supportEmail = (item.settingsMap && item.settingsMap['Support Email']) || 'support@smartstore.com';\nconst text = `I've flagged your conversation for a human agent - someone from our team will reach out shortly. You can also email us at ${supportEmail}.`;\nreturn [{ json: { ...item, replyText: text, needsHumanEscalation: true } }];\n"
+      },
+      "id": "Handle_Human",
+      "name": "Handle Human",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst { productId, qty } = item.routeData || {};\nconst products = item.tables.products || [];\n\nif (!productId) {\n  return [{ json: { ...item, replyText: \"Please use the format: CART ADD <ProductID> <Qty>, e.g. CART ADD P003 1\" } }];\n}\n\nconst product = products.find(p => (p['Product ID'] || '').toUpperCase() === productId && p['Status'] === 'Active');\nif (!product) {\n  return [{ json: { ...item, replyText: `I couldn't find an active product with ID ${productId}. Type MENU or search by name to see options.` } }];\n}\n\nconst stock = parseInt(product['Stock'], 10) || 0;\n\n// how many of this product are already in the cart\nconst existingQty = item.session.cart\n  .filter(c => c.productId === productId)\n  .reduce((sum, c) => sum + c.qty, 0);\n\nif (existingQty + qty > stock) {\n  return [{ json: { ...item, replyText: `Sorry, only ${stock} unit(s) of ${product['Product Name']} are in stock (you already have ${existingQty} in your cart).` } }];\n}\n\nitem.session.cart.push({\n  productId,\n  name: product['Product Name'],\n  price: parseFloat(product['Final Price']) || parseFloat(product['Price']) || 0,\n  qty\n});\n\nconst text = `Added ${qty} x ${product['Product Name']} to your cart \u2705\\nType CART to view your cart or CHECKOUT to place your order.`;\nreturn [{ json: { ...item, replyText: text } }];\n"
+      },
+      "id": "Handle_Cart_Add",
+      "name": "Handle Cart Add",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst cart = item.session.cart || [];\nconst currency = (item.settingsMap && item.settingsMap['Currency']) || 'USD';\n\nif (cart.length === 0) {\n  return [{ json: { ...item, replyText: \"Your cart is empty. Search for a product or type MENU to see options.\" } }];\n}\n\nlet total = 0;\nlet lines = cart.map(c => {\n  const lineTotal = c.price * c.qty;\n  total += lineTotal;\n  return `${c.qty} x ${c.name} - ${currency} ${lineTotal.toFixed(2)}`;\n});\n\nlet couponLine = '';\nif (item.session.appliedCoupon) {\n  const disc = item.session.appliedCoupon.discountPct;\n  const discountAmt = total * (disc / 100);\n  couponLine = `\\nCoupon ${item.session.appliedCoupon.code}: -${currency} ${discountAmt.toFixed(2)}`;\n  total -= discountAmt;\n}\n\nconst text = `\ud83d\uded2 Your Cart:\\n${lines.join('\\n')}${couponLine}\\n\\nTotal: ${currency} ${total.toFixed(2)}\\n\\nType CHECKOUT to place your order.`;\nreturn [{ json: { ...item, replyText: text } }];\n"
+      },
+      "id": "Handle_Cart_View",
+      "name": "Handle Cart View",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nitem.session.cart = [];\nitem.session.appliedCoupon = null;\nreturn [{ json: { ...item, replyText: \"Your cart has been cleared.\" } }];\n"
+      },
+      "id": "Handle_Cart_Clear",
+      "name": "Handle Cart Clear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst code = (item.routeData && item.routeData.code) || '';\nconst coupons = item.tables.coupons || [];\nconst currency = (item.settingsMap && item.settingsMap['Currency']) || 'USD';\n\nif (!code) {\n  return [{ json: { ...item, replyText: \"Please use the format: COUPON <CODE>, e.g. COUPON WELCOME10\" } }];\n}\n\nconst coupon = coupons.find(c => (c['Coupon Code'] || '').toUpperCase() === code);\nif (!coupon || coupon['Status'] !== 'Active') {\n  return [{ json: { ...item, replyText: `Coupon code ${code} is not valid.` } }];\n}\n\nconst expiry = new Date(coupon['Expiry']);\nconst now = new Date();\nif (!isNaN(expiry.getTime()) && expiry < now) {\n  return [{ json: { ...item, replyText: `Coupon code ${code} has expired.` } }];\n}\n\nconst cartTotal = (item.session.cart || []).reduce((sum, c) => sum + c.price * c.qty, 0);\nconst minOrder = parseFloat(coupon['Minimum Order']) || 0;\n\nif (cartTotal < minOrder) {\n  return [{ json: { ...item, replyText: `Coupon ${code} requires a minimum order of ${currency} ${minOrder}. Your current cart total is ${currency} ${cartTotal.toFixed(2)}.` } }];\n}\n\nconst discountPct = parseFloat((coupon['Discount'] || '0').replace('%', '')) || 0;\nitem.session.appliedCoupon = { code: coupon['Coupon Code'], discountPct };\n\nreturn [{ json: { ...item, replyText: `Coupon ${code} applied! You get ${discountPct}% off. Type CART to see your updated total.` } }];\n"
+      },
+      "id": "Handle_Coupon",
+      "name": "Handle Coupon",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst fs = require('fs');\nconst path = require('path');\nconst DATA_DIR = '/data';\n\nfunction splitCSVLine(line) {\n  const result = [];\n  let cur = '';\n  let inQuotes = false;\n  for (let i = 0; i < line.length; i++) {\n    const c = line[i];\n    if (c === '\"') {\n      if (inQuotes && line[i + 1] === '\"') { cur += '\"'; i++; }\n      else { inQuotes = !inQuotes; }\n    } else if (c === ',' && !inQuotes) {\n      result.push(cur); cur = '';\n    } else {\n      cur += c;\n    }\n  }\n  result.push(cur);\n  return result.map(v => v.trim());\n}\n\nfunction parseCSV(content) {\n  if (!content) return [];\n  const lines = content.split(/\\r?\\n/).filter(l => l.length > 0);\n  if (lines.length === 0) return [];\n  const headers = splitCSVLine(lines[0]);\n  const rows = [];\n  for (let i = 1; i < lines.length; i++) {\n    const vals = splitCSVLine(lines[i]);\n    const obj = {};\n    headers.forEach((h, idx) => { obj[h] = vals[idx] !== undefined ? vals[idx] : ''; });\n    rows.push(obj);\n  }\n  return rows;\n}\n\nfunction toCSVValue(v) {\n  v = (v === undefined || v === null) ? '' : String(v);\n  if (v.includes(',') || v.includes('\"') || v.includes('\\n')) {\n    v = '\"' + v.replace(/\"/g, '\"\"') + '\"';\n  }\n  return v;\n}\n\nfunction rowsToCSV(rows, headers) {\n  const lines = [headers.join(',')];\n  rows.forEach(r => { lines.push(headers.map(h => toCSVValue(r[h])).join(',')); });\n  return lines.join('\\n') + '\\n';\n}\n\nfunction readTable(filename) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    if (!fs.existsSync(filePath)) return { rows: [], headers: [] };\n    const content = fs.readFileSync(filePath, 'utf8');\n    const rows = parseCSV(content);\n    const headers = rows.length > 0 ? Object.keys(rows[0]) : (content.split(/\\r?\\n/)[0] || '').split(',').map(h => h.trim());\n    return { rows, headers };\n  } catch (e) {\n    return { rows: [], headers: [], error: e.message };\n  }\n}\n\nfunction writeTable(filename, rows, headers) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    fs.writeFileSync(filePath, rowsToCSV(rows, headers), 'utf8');\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\nfunction appendLog(filename, row, headers) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    let existed = fs.existsSync(filePath);\n    const line = headers.map(h => toCSVValue(row[h])).join(',') + '\\n';\n    if (!existed) {\n      fs.writeFileSync(filePath, headers.join(',') + '\\n' + line, 'utf8');\n    } else {\n      fs.appendFileSync(filePath, line, 'utf8');\n    }\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\nconst item = $input.first().json;\nconst cart = item.session.cart || [];\nconst currency = (item.settingsMap && item.settingsMap['Currency']) || 'USD';\n\nif (cart.length === 0) {\n  return [{ json: { ...item, replyText: \"Your cart is empty. Add a product first, e.g. CART ADD P003 1\", sendAdminEmail: false } }];\n}\n\n// Re-read products fresh (avoid selling stock that changed since the session started)\nconst { rows: products, headers: productHeaders } = readTable('products.csv');\n\n// ---- Validate stock for every cart line before committing anything ----\nlet insufficient = [];\ncart.forEach(c => {\n  const p = products.find(p => (p['Product ID'] || '').toUpperCase() === c.productId);\n  const stock = p ? (parseInt(p['Stock'], 10) || 0) : 0;\n  if (!p || stock < c.qty) {\n    insufficient.push(`${c.name} (only ${stock} left)`);\n  }\n});\n\nif (insufficient.length > 0) {\n  return [{\n    json: {\n      ...item,\n      replyText: `Sorry, we can't complete checkout - insufficient stock for: ${insufficient.join(', ')}. Type CART to review your cart.`,\n      sendAdminEmail: false\n    }\n  }];\n}\n\n// ---- Compute totals ----\nlet subtotal = cart.reduce((sum, c) => sum + c.price * c.qty, 0);\nlet discountAmt = 0;\nlet couponCode = '';\nif (item.session.appliedCoupon) {\n  couponCode = item.session.appliedCoupon.code;\n  discountAmt = subtotal * (item.session.appliedCoupon.discountPct / 100);\n}\nconst freeShipThreshold = parseFloat(item.settingsMap['Free Shipping Threshold']) || 0;\nconst afterDiscount = subtotal - discountAmt;\nconst shippingCost = afterDiscount >= freeShipThreshold ? 0 : 10;\nconst taxRate = parseFloat((item.settingsMap['Tax Rate'] || '0').replace('%', '')) / 100;\nconst tax = afterDiscount * taxRate;\nconst grandTotal = afterDiscount + shippingCost + tax;\n\n// ---- Decrement stock on disk ----\ncart.forEach(c => {\n  const p = products.find(p => (p['Product ID'] || '').toUpperCase() === c.productId);\n  if (p) {\n    const newStock = Math.max(0, (parseInt(p['Stock'], 10) || 0) - c.qty);\n    p['Stock'] = String(newStock);\n  }\n});\nwriteTable('products.csv', products, productHeaders);\n\n// ---- Append order rows ----\nconst { rows: orderRows, headers: orderHeaders } = readTable('orders.csv');\nconst finalHeaders = orderHeaders.length ? orderHeaders : ['Order ID','Customer ID','Phone','Product ID','Product Name','Qty','Unit Price','Total','Coupon','Payment','Order Status','Shipping Status','Tracking Number','Date'];\n\nconst orderIdBase = 'ORD' + Date.now().toString().slice(-8);\nconst today = new Date().toISOString().slice(0, 10);\n\ncart.forEach((c, idx) => {\n  orderRows.push({\n    'Order ID': orderIdBase + '-' + (idx + 1),\n    'Customer ID': '',\n    'Phone': item.phone,\n    'Product ID': c.productId,\n    'Product Name': c.name,\n    'Qty': String(c.qty),\n    'Unit Price': c.price.toFixed(2),\n    'Total': (c.price * c.qty).toFixed(2),\n    'Coupon': couponCode,\n    'Payment': 'COD',\n    'Order Status': 'Confirmed',\n    'Shipping Status': 'Pending',\n    'Tracking Number': '',\n    'Date': today\n  });\n});\nwriteTable('orders.csv', orderRows, finalHeaders);\n\n// ---- Build confirmation message ----\nlet lines = cart.map(c => `${c.qty} x ${c.name} - ${currency} ${(c.price * c.qty).toFixed(2)}`);\nlet text = `\u2705 Order placed! Reference: ${orderIdBase}\\n\\n${lines.join('\\n')}\\n\\nSubtotal: ${currency} ${subtotal.toFixed(2)}`;\nif (discountAmt > 0) text += `\\nDiscount (${couponCode}): -${currency} ${discountAmt.toFixed(2)}`;\ntext += `\\nShipping: ${currency} ${shippingCost.toFixed(2)}`;\ntext += `\\nTax: ${currency} ${tax.toFixed(2)}`;\ntext += `\\nTotal: ${currency} ${grandTotal.toFixed(2)}`;\ntext += `\\nPayment: Cash on Delivery`;\ntext += `\\n\\nWe'll send updates as your order ships. Type TRACK ${orderIdBase}-1 anytime to check status.`;\n\n// clear the cart after successful checkout\nitem.session.cart = [];\nitem.session.appliedCoupon = null;\n\nreturn [{\n  json: {\n    ...item,\n    replyText: text,\n    sendAdminEmail: true,\n    orderSummaryForAdmin: `New order ${orderIdBase} from ${item.phone} (${item.profileName}). Items: ${lines.join('; ')}. Total: ${currency} ${grandTotal.toFixed(2)}. Payment: COD.`\n  }\n}];\n"
+      },
+      "id": "Handle_Checkout",
+      "name": "Handle Checkout",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst products = item.tables.products || [];\nconst currency = (item.settingsMap && item.settingsMap['Currency']) || 'USD';\n\nconst activeProducts = products.filter(p => p['Status'] === 'Active');\nconst catalogText = activeProducts.map(p =>\n  `- ${p['Product ID']} | ${p['Product Name']} | Category: ${p['Category']} | Brand: ${p['Brand']} | Price: ${currency} ${p['Final Price']} | Stock: ${p['Stock']}`\n).join('\\n');\n\nconst systemPrompt = `You are a friendly, concise WhatsApp shopping assistant for an online store. ` +\n  `You may ONLY recommend or mention products from the CATALOG below - never invent products, prices, or stock levels that are not listed. ` +\n  `If nothing in the catalog matches the request, say so honestly and suggest the closest alternatives from the catalog. ` +\n  `Keep replies short (max ~5 lines), plain text (no markdown headers), suitable for WhatsApp. ` +\n  `When recommending a product, include its Product ID so the customer can add it to cart with \"CART ADD <ID> <Qty>\".\\n\\nCATALOG:\\n${catalogText}`;\n\nconst userPrompt = item.text;\n\nreturn [{ json: { ...item, aiRoute: 'product_search', systemPrompt, userPrompt } }];\n"
+      },
+      "id": "Prepare_Product_Search_Prompt",
+      "name": "Prepare Product Search Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst matched = item.routeData && item.routeData.matchedFaq;\nconst allFaqs = item.tables.faqs || [];\n\nconst faqText = allFaqs.map(f => `Q: ${f['Question']}\\nA: ${f['AI Answer']}`).join('\\n\\n');\n\nconst systemPrompt = `You are a helpful WhatsApp customer support assistant for an online store. ` +\n  `Answer ONLY using the information in the FAQ list below. Do not invent policies, numbers, or timeframes that are not stated. ` +\n  `If the FAQ list doesn't cover the question, politely say you're not sure and suggest typing HUMAN to reach a support agent. ` +\n  `Keep the reply short (max 4 lines), plain text, suitable for WhatsApp.\\n\\nFAQ LIST:\\n${faqText}`;\n\nconst userPrompt = matched\n  ? `Customer asked: \"${item.text}\". The closest matching FAQ is: \"${matched['Question']}\" -> \"${matched['AI Answer']}\". Rephrase this answer naturally for the customer.`\n  : item.text;\n\nreturn [{ json: { ...item, aiRoute: 'faq', systemPrompt, userPrompt } }];\n"
+      },
+      "id": "Prepare_FAQ_Prompt",
+      "name": "Prepare FAQ Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst item = $input.first().json;\nconst text = \"Sorry, I didn't quite catch that \ud83e\udd14. Type MENU to see what I can help with, or ask me about a product, an order, delivery, returns, or payments.\";\nreturn [{ json: { ...item, replyText: text } }];\n"
+      },
+      "id": "Prepare_Fallback",
+      "name": "Prepare Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.ollamaUrl}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.config.ollamaModel, stream: false, messages: [ { role: 'system', content: $json.systemPrompt }, { role: 'user', content: $json.userPrompt } ] }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "Ollama_Request",
+      "name": "Ollama Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        610
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// The HTTP Request node's output REPLACES the item json with the raw response,\n// so we recover the original item (phone, session, config, etc.) from whichever\n// \"Prepare ... Prompt\" node actually ran in this execution.\nconst response = $input.first().json;\n\nlet orig = null;\ntry { orig = $('Prepare Product Search Prompt').first().json; } catch (e) { /* did not run */ }\nif (!orig) {\n  try { orig = $('Prepare FAQ Prompt').first().json; } catch (e) { /* did not run */ }\n}\nif (!orig) {\n  // last-resort safety net so the workflow never crashes here\n  orig = { phone: '', session: { cart: [] }, config: {}, aiRoute: 'faq', routeData: {} };\n}\n\nlet replyText = '';\ntry {\n  // Ollama /api/chat success shape: { message: { role, content }, ... }\n  if (response && response.message && response.message.content) {\n    replyText = String(response.message.content).trim();\n  }\n} catch (e) {\n  replyText = '';\n}\n\nif (!replyText) {\n  // Graceful fallback if Ollama is unreachable/errored/empty - never leave the customer hanging\n  if (orig.aiRoute === 'faq') {\n    const matched = orig.routeData && orig.routeData.matchedFaq;\n    replyText = matched\n      ? matched['AI Answer']\n      : \"I'm having trouble answering that right now. Type HUMAN to reach a support agent, or MENU to see other options.\";\n  } else {\n    replyText = \"I'm having trouble searching right now. Please try again in a moment, or type MENU to see other options.\";\n  }\n}\n\nreturn [{ json: { ...orig, replyText } }];\n"
+      },
+      "id": "Format_AI_Reply",
+      "name": "Format AI Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        610
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "e1",
+              "leftValue": "={{$json.sendAdminEmail}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "IF_Send_Admin_Email",
+      "name": "IF Send Admin Email",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$json.config.adminEmail}}",
+        "toEmail": "={{$json.config.adminEmail}}",
+        "subject": "New WhatsApp Order Received",
+        "text": "={{$json.orderSummaryForAdmin}}",
+        "options": {}
+      },
+      "id": "Email_Admin_New_Order",
+      "name": "Email Admin New Order",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1980,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "notes": "Configure SMTP credentials on this node (Gmail app password or your own SMTP). Failures here never block the customer's WhatsApp reply."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{$json.config.graphApiVersion}}/{{$json.config.phoneNumberId}}/messages",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.config.whatsappToken}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.phone, type: 'text', text: { body: $json.replyText || 'Sorry, something went wrong. Please try again.' } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "Send_WhatsApp_Message",
+      "name": "Send WhatsApp Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst fs = require('fs');\nconst path = require('path');\nconst DATA_DIR = '/data';\n\nfunction splitCSVLine(line) {\n  const result = [];\n  let cur = '';\n  let inQuotes = false;\n  for (let i = 0; i < line.length; i++) {\n    const c = line[i];\n    if (c === '\"') {\n      if (inQuotes && line[i + 1] === '\"') { cur += '\"'; i++; }\n      else { inQuotes = !inQuotes; }\n    } else if (c === ',' && !inQuotes) {\n      result.push(cur); cur = '';\n    } else {\n      cur += c;\n    }\n  }\n  result.push(cur);\n  return result.map(v => v.trim());\n}\n\nfunction parseCSV(content) {\n  if (!content) return [];\n  const lines = content.split(/\\r?\\n/).filter(l => l.length > 0);\n  if (lines.length === 0) return [];\n  const headers = splitCSVLine(lines[0]);\n  const rows = [];\n  for (let i = 1; i < lines.length; i++) {\n    const vals = splitCSVLine(lines[i]);\n    const obj = {};\n    headers.forEach((h, idx) => { obj[h] = vals[idx] !== undefined ? vals[idx] : ''; });\n    rows.push(obj);\n  }\n  return rows;\n}\n\nfunction toCSVValue(v) {\n  v = (v === undefined || v === null) ? '' : String(v);\n  if (v.includes(',') || v.includes('\"') || v.includes('\\n')) {\n    v = '\"' + v.replace(/\"/g, '\"\"') + '\"';\n  }\n  return v;\n}\n\nfunction rowsToCSV(rows, headers) {\n  const lines = [headers.join(',')];\n  rows.forEach(r => { lines.push(headers.map(h => toCSVValue(r[h])).join(',')); });\n  return lines.join('\\n') + '\\n';\n}\n\nfunction readTable(filename) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    if (!fs.existsSync(filePath)) return { rows: [], headers: [] };\n    const content = fs.readFileSync(filePath, 'utf8');\n    const rows = parseCSV(content);\n    const headers = rows.length > 0 ? Object.keys(rows[0]) : (content.split(/\\r?\\n/)[0] || '').split(',').map(h => h.trim());\n    return { rows, headers };\n  } catch (e) {\n    return { rows: [], headers: [], error: e.message };\n  }\n}\n\nfunction writeTable(filename, rows, headers) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    fs.writeFileSync(filePath, rowsToCSV(rows, headers), 'utf8');\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\nfunction appendLog(filename, row, headers) {\n  try {\n    const filePath = path.join(DATA_DIR, filename);\n    let existed = fs.existsSync(filePath);\n    const line = headers.map(h => toCSVValue(row[h])).join(',') + '\\n';\n    if (!existed) {\n      fs.writeFileSync(filePath, headers.join(',') + '\\n' + line, 'utf8');\n    } else {\n      fs.appendFileSync(filePath, line, 'utf8');\n    }\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\nconst item = $input.first().json;\ntry {\n  appendLog('logs.csv', {\n    Timestamp: new Date().toISOString(),\n    Phone: item.phone || '',\n    Direction: 'outbound',\n    MessageType: item.route || item.aiRoute || 'unknown',\n    Content: (item.replyText || '').replace(/\\n/g, ' ').slice(0, 200),\n    Status: 'sent'\n  }, ['Timestamp', 'Phone', 'Direction', 'MessageType', 'Content', 'Status']);\n} catch (e) {\n  // logging must never break the workflow\n}\nreturn [{ json: item }];\n"
+      },
+      "id": "Log_Interaction",
+      "name": "Log Interaction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2420,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Webhook Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Check Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Verify Token": {
+      "main": [
+        [
+          {
+            "node": "Respond Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Receive (POST)": {
+      "main": [
+        [
+          {
+            "node": "Parse Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Message": {
+      "main": [
+        [
+          {
+            "node": "IF Has Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Message": {
+      "main": [
+        [
+          {
+            "node": "Session Dedup RateLimit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NoOp Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Session Dedup RateLimit": {
+      "main": [
+        [
+          {
+            "node": "IF Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Duplicate": {
+      "main": [
+        [
+          {
+            "node": "NoOp Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Rate Limited",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Rate Limited": {
+      "main": [
+        [
+          {
+            "node": "Build Rate Limit Msg",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load Data & Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Data & Route": {
+      "main": [
+        [
+          {
+            "node": "Switch Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Route": {
+      "main": [
+        [
+          {
+            "node": "Handle Menu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Track",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Human",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Cart Add",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Cart View",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Cart Clear",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Checkout",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Coupon",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Product Search Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare FAQ Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Product Search Prompt": {
+      "main": [
+        [
+          {
+            "node": "Ollama Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare FAQ Prompt": {
+      "main": [
+        [
+          {
+            "node": "Ollama Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Request": {
+      "main": [
+        [
+          {
+            "node": "Format AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Checkout": {
+      "main": [
+        [
+          {
+            "node": "IF Send Admin Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Send Admin Email": {
+      "main": [
+        [
+          {
+            "node": "Email Admin New Order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Menu": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Track": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Human": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Cart Add": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Cart View": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Cart Clear": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Coupon": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fallback": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Rate Limit Msg": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI Reply": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Admin New Order": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "Log Interaction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "timezone": "UTC"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "ecommerce-whatsapp-assistant"
+  }
+}

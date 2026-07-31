@@ -1,0 +1,11 @@
+Setting,Value
+Business Name,Smart Store
+Business Email,admin@smartstore.com
+Business Phone,+923001234567
+Currency,USD
+Tax Rate,10%
+Free Shipping Threshold,100
+Store Hours,9:00 AM - 8:00 PM
+AI Model,llama3.1:8b
+Human Handoff,Enabled
+Support Email,support@smartstore.com

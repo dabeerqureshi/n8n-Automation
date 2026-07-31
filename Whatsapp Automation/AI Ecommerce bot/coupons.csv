@@ -1,0 +1,5 @@
+Coupon Code,Discount,Minimum Order,Expiry,Status
+WELCOME10,10%,100,2026-12-31,Active
+SAVE20,20%,500,2026-10-31,Active
+SUMMER15,15%,250,2026-09-15,Active
+EXPIRED5,5%,50,2026-01-01,Active
