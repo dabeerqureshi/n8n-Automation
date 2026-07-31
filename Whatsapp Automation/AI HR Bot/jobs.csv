@@ -1,0 +1,9 @@
+Job ID,Position,Department,Location,Experience,Salary,Skills,Status,Apply URL
+J001,AI Engineer,AI,Lahore,2 Years,PKR 250000-350000,"Python, LangChain, n8n, Docker",Open,https://company.com/jobs/ai-engineer
+J002,Backend Developer,Engineering,Islamabad,3 Years,PKR 180000-250000,"Node.js, PostgreSQL, REST APIs",Open,https://company.com/jobs/backend
+J003,Frontend Developer,Engineering,Lahore,2 Years,PKR 150000-220000,"React, TypeScript, TailwindCSS",Open,https://company.com/jobs/frontend
+J004,Python Developer,Engineering,Karachi,1 Year,PKR 120000-180000,"Python, Django, SQL",Open,https://company.com/jobs/python-developer
+J005,DevOps Engineer,Infrastructure,Lahore,3 Years,PKR 220000-320000,"AWS, Docker, Kubernetes, CI/CD",Closed,https://company.com/jobs/devops
+J006,QA Engineer,Quality Assurance,Islamabad,2 Years,PKR 130000-190000,"Manual Testing, Selenium, API Testing",Open,https://company.com/jobs/qa-engineer
+J007,Software Engineer Intern,Engineering,Lahore,Fresh Graduate,PKR 40000-60000,"Java, Python, Data Structures",Open,https://company.com/jobs/intern-swe
+J008,Machine Learning Engineer,AI,Lahore,3 Years,PKR 280000-380000,"Python, PyTorch, NLP, LLMs",Open,https://company.com/jobs/ml-engineer

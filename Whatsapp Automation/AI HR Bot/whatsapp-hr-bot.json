@@ -1,0 +1,788 @@
+{
+  "name": "AI WhatsApp HR Recruitment Bot (MVP)",
+  "nodes": [
+    {
+      "id": "webhook_verify",
+      "name": "Webhook - Verify",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -300
+      ],
+      "webhookId": "whatsapp-hr-bot-verify",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "check_verify_token",
+      "name": "Check Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        -300
+      ],
+      "notes": "Validates Meta's GET verification handshake",
+      "parameters": {
+        "jsCode": "// Compares the token WhatsApp sends against our stored verify token.\n// Set WHATSAPP_VERIFY_TOKEN in n8n Settings > Environment Variables (or .env)\nconst query = $input.first().json.query || {};\nconst mode = query['hub.mode'];\nconst token = query['hub.verify_token'];\nconst challenge = query['hub.challenge'];\n\nconst expectedToken = $env.WHATSAPP_VERIFY_TOKEN || 'CHANGE_ME_VERIFY_TOKEN';\n\nif (mode === 'subscribe' && token === expectedToken) {\n  return [{ json: { ok: true, challenge: challenge } }];\n}\nreturn [{ json: { ok: false, challenge: '' } }];\n"
+      }
+    },
+    {
+      "id": "respond_challenge_ok",
+      "name": "Respond - Challenge OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -760,
+        -380
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "respond_challenge_fail",
+      "name": "Respond - Verify Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -760,
+        -220
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Forbidden",
+        "options": {
+          "responseCode": 403
+        }
+      }
+    },
+    {
+      "id": "if_verify_ok",
+      "name": "IF - Token Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -980,
+        -380
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "webhook_receive",
+      "name": "Webhook - Receive Message",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        100
+      ],
+      "webhookId": "whatsapp-hr-bot-receive",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "options": {}
+      }
+    },
+    {
+      "id": "extract_message",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        100
+      ],
+      "notes": "Parses the raw Meta webhook body into a clean message object",
+      "parameters": {
+        "jsCode": "// Pulls the relevant fields out of the WhatsApp Cloud API payload.\n// Returns hasMessage=false for non-message events (e.g. delivery/read receipts)\nconst body = $input.first().json.body || {};\n\ntry {\n  const entry = body.entry?.[0];\n  const change = entry?.changes?.[0];\n  const value = change?.value;\n  const message = value?.messages?.[0];\n\n  if (!message) {\n    return [{ json: { hasMessage: false } }];\n  }\n\n  const from = message.from; // customer's WhatsApp number\n  const messageId = message.id;\n  const contactName = value.contacts?.[0]?.profile?.name || '';\n  let text = '';\n\n  if (message.type === 'text') {\n    text = message.text.body;\n  } else if (message.type === 'interactive') {\n    text = message.interactive?.button_reply?.title\n      || message.interactive?.list_reply?.title\n      || '';\n  } else {\n    // unsupported message type (image, audio, location, etc.)\n    return [{ json: { hasMessage: false } }];\n  }\n\n  return [{\n    json: {\n      hasMessage: true,\n      from,\n      messageId,\n      contactName,\n      text: (text || '').trim()\n    }\n  }];\n} catch (err) {\n  return [{ json: { hasMessage: false, error: err.message } }];\n}\n"
+      }
+    },
+    {
+      "id": "if_has_message",
+      "name": "IF - Has Text Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -760,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.hasMessage }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "noop_ignore_event",
+      "name": "No-Op - Ignore Event",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -540,
+        220
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "ollama_intent",
+      "name": "Ollama - Detect Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -540,
+        60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_BASE_URL || 'http://localhost:11434' }}/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: $env.OLLAMA_MODEL || 'llama3.1',\n  stream: false,\n  format: 'json',\n  options: { temperature: 0 },\n  messages: [\n    {\n      role: 'system',\n      content: 'You are an intent classifier for an HR recruitment WhatsApp bot. Read the candidate message and reply with ONLY a JSON object, no extra text, matching this schema: {\"intent\": \"job_discovery|apply_job|faq|greeting|other\", \"keywords\": [\"lowercase\",\"keywords\"], \"job_name\": \"exact job title if intent is apply_job else empty string\"}. Rules: job_discovery = candidate is browsing/searching for openings. apply_job = candidate explicitly wants to apply for a named position. faq = candidate is asking about company policy, benefits, timings, location, process, remote work, leaves, etc. greeting = hello/hi/small talk with no other intent. other = anything else. Never include commentary, only the JSON object.'\n    },\n    {\n      role: 'user',\n      content: $json.text\n    }\n  ]\n}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "parse_intent",
+      "name": "Parse Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        60
+      ],
+      "notes": "Parses and validates the Ollama JSON response",
+      "parameters": {
+        "jsCode": "// Safely parses the LLM's JSON classification. Falls back to 'other'\n// if Ollama returns malformed JSON so the flow never breaks.\nconst original = $('Extract Message').first().json;\nlet content = $input.first().json.message?.content || '{}';\n\nlet parsed;\ntry {\n  parsed = JSON.parse(content);\n} catch (err) {\n  parsed = { intent: 'other', keywords: [], job_name: '' };\n}\n\nconst allowed = ['job_discovery', 'apply_job', 'faq', 'greeting', 'other'];\nif (!allowed.includes(parsed.intent)) parsed.intent = 'other';\nif (!Array.isArray(parsed.keywords)) parsed.keywords = [];\nif (typeof parsed.job_name !== 'string') parsed.job_name = '';\n\nreturn [{\n  json: {\n    from: original.from,\n    text: original.text,\n    contactName: original.contactName,\n    intent: parsed.intent,\n    keywords: parsed.keywords.map(k => String(k).toLowerCase()),\n    job_name: parsed.job_name\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "switch_intent",
+      "name": "Switch - Route Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -100,
+        60
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "r1",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "job_discovery",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "job_discovery"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "r2",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "apply_job",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "apply_job"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "r3",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "faq",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "faq"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      }
+    },
+    {
+      "id": "read_jobs_csv_a",
+      "name": "Read Jobs CSV",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        140,
+        -180
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $env.JOBS_CSV_PATH || '/data/jobs.csv' }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse_jobs_csv_a",
+      "name": "Parse Jobs CSV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        360,
+        -180
+      ],
+      "parameters": {
+        "operation": "csv",
+        "options": {}
+      }
+    },
+    {
+      "id": "score_&_filter_jobs",
+      "name": "Score & Filter Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        -180
+      ],
+      "notes": "Simple deterministic keyword scoring - no hallucination risk",
+      "parameters": {
+        "jsCode": "// Ranks open jobs by keyword overlap against Position/Department/Skills.\n// Returns the top 5 matches, or all open jobs if no keywords matched.\nconst intentData = $('Parse Intent').first().json;\nconst keywords = intentData.keywords.length\n  ? intentData.keywords\n  : intentData.text.toLowerCase().split(/\\s+/);\n\nconst jobs = $input.all().map(item => item.json);\n\nfunction score(job) {\n  const haystack = [job.Position, job.Department, job.Skills]\n    .join(' ')\n    .toLowerCase();\n  let s = 0;\n  for (const kw of keywords) {\n    if (kw.length > 2 && haystack.includes(kw)) s += 1;\n  }\n  return s;\n}\n\nconst openJobs = jobs.filter(j => (j.Status || '').trim().toLowerCase() === 'open');\nconst scored = openJobs\n  .map(j => ({ job: j, score: score(j) }))\n  .sort((a, b) => b.score - a.score);\n\nconst hasMatches = scored.some(s => s.score > 0);\nconst results = (hasMatches ? scored.filter(s => s.score > 0) : scored)\n  .slice(0, 5)\n  .map(s => s.job);\n\nreturn [{\n  json: {\n    from: intentData.from,\n    matches: results\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "format_job_list_message",
+      "name": "Format Job List Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -180
+      ],
+      "notes": "",
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst jobs = data.matches;\n\nlet reply;\nif (!jobs.length) {\n  reply = \"Sorry, we don't have any matching openings right now. Would you like to see all current job openings instead?\";\n} else {\n  const lines = jobs.map((j, i) => {\n    return `${i + 1}. *${j.Position}*\\n📍 ${j.Location}\\n💰 ${j.Salary}\\n🛠 Skills: ${j.Skills}\\n\\nApply Here:\\n${j['Apply URL']}`;\n  });\n  reply = `We currently have these openings:\\n\\n${lines.join('\\n\\n--------------------------------\\n\\n')}\\n\\nReply with the job title if you'd like to apply.`;\n}\n\nreturn [{ json: { from: data.from, replyText: reply } }];\n"
+      }
+    },
+    {
+      "id": "read_jobs_csv_b",
+      "name": "Read Jobs CSV (Apply)",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        140,
+        60
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $env.JOBS_CSV_PATH || '/data/jobs.csv' }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse_jobs_csv_b",
+      "name": "Parse Jobs CSV (Apply)",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        360,
+        60
+      ],
+      "parameters": {
+        "operation": "csv",
+        "options": {}
+      }
+    },
+    {
+      "id": "find_job_for_apply",
+      "name": "Find Job For Apply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        60
+      ],
+      "notes": "",
+      "parameters": {
+        "jsCode": "// Matches the candidate's requested job title against the CSV (case-insensitive,\n// partial match) and checks whether the role is still open.\nconst intentData = $('Parse Intent').first().json;\nconst requested = (intentData.job_name || intentData.text || '').toLowerCase().trim();\n\nconst jobs = $input.all().map(item => item.json);\n\nlet match = jobs.find(j => (j.Position || '').toLowerCase() === requested);\nif (!match) {\n  match = jobs.find(j => requested && (j.Position || '').toLowerCase().includes(requested));\n}\nif (!match) {\n  match = jobs.find(j => requested && requested.includes((j.Position || '').toLowerCase()) && j.Position);\n}\n\nreturn [{\n  json: {\n    from: intentData.from,\n    found: !!match,\n    isOpen: match ? (match.Status || '').trim().toLowerCase() === 'open' : false,\n    position: match ? match.Position : (intentData.job_name || ''),\n    applyUrl: match ? match['Apply URL'] : ''\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "format_apply_message",
+      "name": "Format Apply Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        60
+      ],
+      "notes": "",
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nlet reply;\n\nif (!d.found) {\n  reply = \"I couldn't find that position. Could you tell me the exact job title? Or type 'jobs' to see current openings.\";\n} else if (!d.isOpen) {\n  reply = `Sorry, the ${d.position} position is currently closed.\\n\\nWould you like to see similar openings?`;\n} else {\n  reply = `Great! You can apply for the ${d.position} position using the link below:\\n\\n${d.applyUrl}\\n\\nPlease complete the application form and upload your latest resume.\\n\\nGood luck!`;\n}\n\nreturn [{ json: { from: d.from, replyText: reply } }];\n"
+      }
+    },
+    {
+      "id": "read_faqs_csv",
+      "name": "Read FAQs CSV",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        140,
+        300
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $env.FAQS_CSV_PATH || '/data/faqs.csv' }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse_faqs_csv",
+      "name": "Parse FAQs CSV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        360,
+        300
+      ],
+      "parameters": {
+        "operation": "csv",
+        "options": {}
+      }
+    },
+    {
+      "id": "match_faq",
+      "name": "Match FAQ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        300
+      ],
+      "notes": "Deterministic keyword match - only answers from the FAQ sheet, never invents",
+      "parameters": {
+        "jsCode": "// Scores each FAQ question by word overlap with the candidate's message.\nconst intentData = $('Parse Intent').first().json;\nconst queryWords = new Set(\n  (intentData.text || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2)\n);\n\nconst faqs = $input.all().map(item => item.json);\n\nfunction score(faq) {\n  const qWords = (faq.Question || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);\n  let s = 0;\n  for (const w of qWords) {\n    if (queryWords.has(w)) s += 1;\n  }\n  return s;\n}\n\nlet best = null;\nlet bestScore = 0;\nfor (const f of faqs) {\n  const s = score(f);\n  if (s > bestScore) {\n    bestScore = s;\n    best = f;\n  }\n}\n\nreturn [{\n  json: {\n    from: intentData.from,\n    found: !!best && bestScore > 0,\n    answer: best ? best.Answer : ''\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "format_faq_message",
+      "name": "Format FAQ Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        300
+      ],
+      "notes": "",
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst reply = d.found\n  ? d.answer\n  : \"I don't have that information yet. You can email hr@company.com and our team will help you directly.\";\n\nreturn [{ json: { from: d.from, replyText: reply } }];\n"
+      }
+    },
+    {
+      "id": "fallback_message",
+      "name": "Fallback Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        520
+      ],
+      "notes": "",
+      "parameters": {
+        "jsCode": "const d = $('Parse Intent').first().json;\nconst reply = \"Hi! I'm the HR recruitment assistant 👋\\n\\nYou can ask me things like:\\n- \\\"Show me AI Engineer jobs\\\"\\n- \\\"What are your office timings?\\\"\\n- \\\"I want to apply for Backend Developer\\\"\\n\\nHow can I help you today?\";\nreturn [{ json: { from: d.from, replyText: reply } }];\n"
+      }
+    },
+    {
+      "id": "send_whatsapp_reply",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.from, type: 'text', text: { body: $json.replyText, preview_url: false } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "notes": "Uses an HTTP Header Auth credential named 'WhatsApp Cloud API' with header Authorization: Bearer <permanent token>"
+    }
+  ],
+  "connections": {
+    "Webhook - Verify": {
+      "main": [
+        [
+          {
+            "node": "Check Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Verify Token": {
+      "main": [
+        [
+          {
+            "node": "IF - Token Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Token Valid?": {
+      "main": [
+        [
+          {
+            "node": "Respond - Challenge OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Verify Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Receive Message": {
+      "main": [
+        [
+          {
+            "node": "Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Text Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Text Message?": {
+      "main": [
+        [
+          {
+            "node": "Ollama - Detect Intent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No-Op - Ignore Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama - Detect Intent": {
+      "main": [
+        [
+          {
+            "node": "Parse Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Intent": {
+      "main": [
+        [
+          {
+            "node": "Switch - Route Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch - Route Intent": {
+      "main": [
+        [
+          {
+            "node": "Read Jobs CSV",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Jobs CSV (Apply)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read FAQs CSV",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fallback Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Jobs CSV": {
+      "main": [
+        [
+          {
+            "node": "Parse Jobs CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Jobs CSV": {
+      "main": [
+        [
+          {
+            "node": "Score & Filter Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score & Filter Jobs": {
+      "main": [
+        [
+          {
+            "node": "Format Job List Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Job List Message": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Jobs CSV (Apply)": {
+      "main": [
+        [
+          {
+            "node": "Parse Jobs CSV (Apply)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Jobs CSV (Apply)": {
+      "main": [
+        [
+          {
+            "node": "Find Job For Apply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Job For Apply": {
+      "main": [
+        [
+          {
+            "node": "Format Apply Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Apply Message": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read FAQs CSV": {
+      "main": [
+        [
+          {
+            "node": "Parse FAQs CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse FAQs CSV": {
+      "main": [
+        [
+          {
+            "node": "Match FAQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match FAQ": {
+      "main": [
+        [
+          {
+            "node": "Format FAQ Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format FAQ Message": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Message": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
