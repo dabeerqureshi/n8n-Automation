@@ -1,0 +1,125 @@
+{
+  "name": "WhatsApp Logistics Bot - Delivery Confirmation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [ { "field": "minutes", "minutesInterval": 15 } ] }
+      },
+      "id": "d1-schedule",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Shipments", "mode": "name" },
+        "operation": "getAll",
+        "options": {}
+      },
+      "id": "d2-get-shipments",
+      "name": "Get All Shipments",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nconst toNotify = rows.filter(r => (r['Status'] || '').toLowerCase() === 'delivered' && (r['Notified'] || '').toString().toLowerCase() !== 'true');\nreturn toNotify.map(r => ({ json: r }));"
+      },
+      "id": "d3-filter-delivered",
+      "name": "Filter Newly Delivered",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json;\nreturn [{ json: {\n  to: d['Phone'],\n  message: `Your shipment ${d['Tracking ID']} has been delivered successfully. Thank you for choosing us!`,\n  customerName: d['Customer'],\n  trackingId: d['Tracking ID']\n} }];"
+      },
+      "id": "d4-format-whatsapp",
+      "name": "Format Delivery Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.WHATSAPP_API_URL || 'https://graph.facebook.com/v20.0') + '/' + $env.WHATSAPP_PHONE_NUMBER_ID + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.WHATSAPP_ACCESS_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.to, type: 'text', text: { body: $json.message } }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "d5-send-whatsapp",
+      "name": "Send WhatsApp Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, -80]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.ADMIN_EMAIL }}",
+        "subject": "={{ 'Shipment Delivered - ' + $json['Tracking ID'] }}",
+        "message": "={{ 'Shipment ' + $json['Tracking ID'] + ' for ' + $json['Customer'] + ' has been marked as delivered.' }}",
+        "options": {}
+      },
+      "id": "d6-notify-admin",
+      "name": "Notify Admin (Optional)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [660, 80],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID", "name": "Gmail account" }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Shipments", "mode": "name" },
+        "operation": "update",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Tracking ID"],
+          "value": {
+            "Tracking ID": "={{ $json.trackingId }}",
+            "Notified": "true"
+          },
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "d7-mark-notified",
+      "name": "Mark As Notified",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, -80]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": { "main": [[ { "node": "Get All Shipments", "type": "main", "index": 0 } ]] },
+    "Get All Shipments": { "main": [[ { "node": "Filter Newly Delivered", "type": "main", "index": 0 } ]] },
+    "Filter Newly Delivered": {
+      "main": [
+        [
+          { "node": "Format Delivery Message", "type": "main", "index": 0 },
+          { "node": "Notify Admin (Optional)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Delivery Message": { "main": [[ { "node": "Send WhatsApp Confirmation", "type": "main", "index": 0 } ]] },
+    "Send WhatsApp Confirmation": { "main": [[ { "node": "Mark As Notified", "type": "main", "index": 0 } ]] }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" },
+  "meta": { "instanceId": "whatsapp-logistics-bot-delivery" }
+}

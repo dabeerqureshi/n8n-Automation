@@ -1,0 +1,6 @@
+Tracking ID,Customer,Phone,Courier,Origin,Destination,Current Location,Status,Expected Delivery,Delay Reason,Notified
+TRK10001,Ali Khan,923001112233,BlueEx,Karachi,Lahore,Lahore Hub,In Transit,5 Aug,,false
+TRK10002,Ahmed,923009998877,TCS,Islamabad,Faisalabad,Faisalabad Hub,Delivered,3 Aug,,true
+TRK10003,Sara,923221234567,Leopards,Lahore,Multan,Multan Hub,Delayed,6 Aug,Weather conditions,false
+TRK10004,Hassan,923335551111,Trax,Karachi,Peshawar,Islamabad Hub,Out for Delivery,Today,,false
+TRK10005,Fatima,923117778899,BlueEx,Sialkot,Lahore,Sialkot Hub,Pending Pickup,7 Aug,,false

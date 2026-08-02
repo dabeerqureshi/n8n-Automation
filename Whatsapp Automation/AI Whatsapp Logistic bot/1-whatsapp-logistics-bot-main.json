@@ -1,0 +1,605 @@
+{
+  "name": "WhatsApp Logistics Bot - Main",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "multipleMethods": true,
+        "methods": ["GET", "POST"],
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "n1-webhook",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "whatsapp-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.query['hub.mode'] }}",
+              "rightValue": "subscribe",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.query['hub.verify_token'] }}",
+              "rightValue": "={{ $env.WHATSAPP_VERIFY_TOKEN }}",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n2-if-verify",
+      "name": "Is Verification Request",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "n3-respond-verify",
+      "name": "Respond Verification Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nlet hasMessage = false;\nlet from = '';\nlet text = '';\nlet messageId = '';\nlet messageType = '';\n\ntry {\n  const entry = body.entry && body.entry[0];\n  const change = entry && entry.changes && entry.changes[0];\n  const value = change && change.value;\n  const message = value && value.messages && value.messages[0];\n\n  if (message) {\n    from = message.from;\n    messageId = message.id;\n    messageType = message.type;\n    if (messageType === 'text' && message.text && message.text.body) {\n      text = message.text.body;\n      hasMessage = text.trim() !== '';\n    }\n  }\n} catch (e) {\n  hasMessage = false;\n}\n\nreturn [{\n  json: { hasMessage, from, text, messageId }\n}];"
+      },
+      "id": "n4-extract",
+      "name": "Extract Message Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.hasMessage }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n5-if-hasmsg",
+      "name": "Has Valid Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"received\" } }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "n6-respond-ack",
+      "name": "Respond OK (Ack)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ignored\" } }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "n7-respond-ignore",
+      "name": "Respond OK (No Message)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = ($json.text || '').replace(/\"/g, \"'\");\nconst systemPrompt = `You are an intent classifier for a courier/logistics WhatsApp bot for a company in Pakistan.\nClassify the customer's message into exactly one intent:\n- track_shipment: asking to track/locate a parcel, or why it's delayed, or when it will arrive\n- shipping_cost: asking how much it costs to send a parcel\n- courier_branch: asking for nearest branch/office address or phone\n- pickup_booking: wants to schedule/book a pickup\n- faq: general questions about policies, delivery time, prohibited items, COD, international shipping, cancellation\n- human_support: wants to talk to a human agent / support\n- fallback: anything else / unclear\n\nAlso extract these fields if present, otherwise use null:\ntrackingId (format TRK followed by digits), city, weight (number in kg), destinationType (one of same_city, same_province, nationwide), name, phone, address, pickupDate\n\nCustomer message: \"${text}\"\n\nRespond with ONLY a single valid JSON object, no explanation, no markdown, in exactly this shape:\n{\"intent\":\"\",\"trackingId\":null,\"city\":null,\"weight\":null,\"destinationType\":null,\"name\":null,\"phone\":null,\"address\":null,\"pickupDate\":null}`;\n\nreturn [{\n  json: {\n    prompt: systemPrompt,\n    model: $env.OLLAMA_MODEL || 'qwen2.5:7b'\n  }\n}];"
+      },
+      "id": "n8-build-prompt",
+      "name": "Build Intent Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.OLLAMA_URL || 'http://localhost:11434') + '/api/generate' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, prompt: $json.prompt, stream: false, format: \"json\" }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "n9-ollama",
+      "name": "Ollama Intent Classification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "let parsed = {};\ntry {\n  const raw = $json.response;\n  parsed = JSON.parse(raw);\n} catch (e) {\n  parsed = { intent: 'fallback' };\n}\n\nconst allowed = ['track_shipment','shipping_cost','courier_branch','pickup_booking','faq','human_support','fallback'];\nif (!allowed.includes(parsed.intent)) parsed.intent = 'fallback';\n\nconst originalText = $('Extract Message Data').first().json.text || '';\nif (!parsed.trackingId) {\n  const match = originalText.match(/TRK\\d+/i);\n  if (match) parsed.trackingId = match[0].toUpperCase();\n}\n\nreturn [{\n  json: {\n    ...parsed,\n    from: $('Extract Message Data').first().json.from,\n    originalText\n  }\n}];"
+      },
+      "id": "n10-parse-intent",
+      "name": "Parse Intent Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 440]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "conditions": [ { "leftValue": "={{ $json.intent }}", "rightValue": "track_shipment", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "track_shipment" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "conditions": [ { "leftValue": "={{ $json.intent }}", "rightValue": "shipping_cost", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "shipping_cost" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "conditions": [ { "leftValue": "={{ $json.intent }}", "rightValue": "courier_branch", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "courier_branch" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "conditions": [ { "leftValue": "={{ $json.intent }}", "rightValue": "pickup_booking", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "pickup_booking" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "conditions": [ { "leftValue": "={{ $json.intent }}", "rightValue": "faq", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "faq" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "conditions": [ { "leftValue": "={{ $json.intent }}", "rightValue": "human_support", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "human_support" }
+          ]
+        },
+        "fallbackOutput": "extra",
+        "options": {}
+      },
+      "id": "n11-switch",
+      "name": "Route By Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1540, 440]
+    },
+
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [ { "leftValue": "={{ $json.trackingId }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } } ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n20-if-hastracking",
+      "name": "Has Tracking ID",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { to: $json.from, message: 'Please share your tracking ID (e.g. TRK10025) so I can check your shipment for you.' } }];"
+      },
+      "id": "n21-ask-tracking",
+      "name": "Ask Tracking ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, -180]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Shipments", "mode": "name" },
+        "operation": "getAll",
+        "options": {}
+      },
+      "id": "n22-get-shipments",
+      "name": "Get All Shipments",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2000, -20]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nconst routed = $('Parse Intent Result').first().json;\nconst trackingId = (routed.trackingId || '').toUpperCase();\nconst match = rows.find(r => (r['Tracking ID'] || '').toString().toUpperCase() === trackingId);\nreturn [{ json: { found: !!match, data: match || null, trackingId: routed.trackingId, from: routed.from } }];"
+      },
+      "id": "n23-find-shipment",
+      "name": "Find Shipment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, -20]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json;\nlet message;\nif (!d.found) {\n  message = `Sorry, I couldn't find a shipment with tracking ID ${d.trackingId || '(not provided)'}. Please double check and try again, or type \"talk to support\" for help.`;\n} else {\n  message = `Shipment Found\\n\\nTracking ID: ${d.data['Tracking ID']}\\nStatus: ${d.data['Status']}\\nCourier: ${d.data['Courier']}\\nCurrent Location: ${d.data['Current Location']}\\nExpected Delivery: ${d.data['Expected Delivery']}`;\n  if (d.data['Delay Reason']) {\n    message += `\\nDelay Reason: ${d.data['Delay Reason']}`;\n  }\n}\nreturn [{ json: { to: d.from, message } }];"
+      },
+      "id": "n24-format-shipment",
+      "name": "Format Shipment Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, -20]
+    },
+
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            { "leftValue": "={{ $json.weight }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } },
+            { "leftValue": "={{ $json.destinationType }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n30-if-hascostdetails",
+      "name": "Check Cost Details",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { to: $json.from, message: 'To calculate shipping cost, please tell me: parcel weight (kg) and destination type - same city, same province, or nationwide.' } }];"
+      },
+      "id": "n31-ask-cost",
+      "name": "Ask Cost Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 60]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Shipping Rates", "mode": "name" },
+        "operation": "getAll",
+        "options": {}
+      },
+      "id": "n32-get-rates",
+      "name": "Get All Shipping Rates",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const routed = $('Parse Intent Result').first().json;\nconst weight = parseFloat(routed.weight);\nconst destType = routed.destinationType;\nconst rows = $input.all().map(i => i.json);\n\nfunction parseRange(rangeStr) {\n  const m = (rangeStr || '').match(/([\\d.]+)\\s*-\\s*([\\d.]+)/);\n  return m ? [parseFloat(m[1]), parseFloat(m[2])] : null;\n}\n\nlet rate = null;\nfor (const r of rows) {\n  const range = parseRange(r['Weight']);\n  if (range && weight > range[0] && weight <= range[1]) { rate = r; break; }\n}\nif (!rate && rows.length) {\n  const first = parseRange(rows[0]['Weight']);\n  const last = parseRange(rows[rows.length - 1]['Weight']);\n  if (first && weight <= first[1]) rate = rows[0];\n  else if (last && weight > last[0]) rate = rows[rows.length - 1];\n}\n\nconst colMap = { same_city: 'Same City', same_province: 'Same Province', nationwide: 'Nationwide' };\nconst col = colMap[destType] || 'Nationwide';\n\nlet message;\nif (!rate) {\n  message = `Sorry, I couldn't calculate a rate for ${weight}kg. Please contact support for a custom quote.`;\n} else {\n  message = `Shipping Cost Estimate\\n\\nWeight: ${weight}kg\\nDestination: ${(destType || '').replace('_', ' ')}\\nCost: PKR ${rate[col]}`;\n}\n\nreturn [{ json: { to: routed.from, message } }];"
+      },
+      "id": "n33-format-cost",
+      "name": "Format Cost Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 200]
+    },
+
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Courier Branches", "mode": "name" },
+        "operation": "getAll",
+        "options": {}
+      },
+      "id": "n40-get-branches",
+      "name": "Get All Branches",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1780, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "const routed = $('Parse Intent Result').first().json;\nconst city = (routed.city || '').toLowerCase();\nconst rows = $input.all().map(i => i.json);\nconst match = rows.find(r => (r['City'] || '').toLowerCase().includes(city) || city.includes((r['City'] || '').toLowerCase()));\n\nlet message;\nif (!city) {\n  message = 'Which city is your nearest branch in? Please tell me your city name.';\n} else if (!match) {\n  message = `Sorry, no branch found for \"${routed.city}\". Please type \"talk to support\" for help.`;\n} else {\n  message = `${match['Courier']} ${match['Branch']} Branch\\n\\nAddress: ${match['Address']}\\nPhone: ${match['Phone']}`;\n}\nreturn [{ json: { to: routed.from, message } }];"
+      },
+      "id": "n41-format-branch",
+      "name": "Format Branch Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 320]
+    },
+
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            { "leftValue": "={{ $json.name }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } },
+            { "leftValue": "={{ $json.phone }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } },
+            { "leftValue": "={{ $json.address }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } },
+            { "leftValue": "={{ $json.weight }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } },
+            { "leftValue": "={{ $json.pickupDate }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n50-if-pickupcomplete",
+      "name": "Check Pickup Details Complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { to: $json.from, message: 'To book a pickup please send: Name, Phone, Address, Parcel Weight (kg), and Pickup Date - all in one message.' } }];"
+      },
+      "id": "n51-ask-pickup",
+      "name": "Ask Pickup Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "const routed = $json;\nconst requestId = 'PU' + Date.now().toString().slice(-7);\nreturn [{\n  json: {\n    'Request ID': requestId,\n    'Name': routed.name,\n    'Phone': routed.phone,\n    'Address': routed.address,\n    'Weight': routed.weight + ' kg',\n    'Pickup Date': routed.pickupDate,\n    'Status': 'Pending',\n    from: routed.from\n  }\n}];"
+      },
+      "id": "n52-gen-pickupid",
+      "name": "Generate Pickup ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 580]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Pickup Requests", "mode": "name" },
+        "operation": "append",
+        "columns": { "mappingMode": "autoMapInputData", "value": {}, "matchingColumns": [], "schema": [] },
+        "options": {}
+      },
+      "id": "n53-append-pickup",
+      "name": "Save Pickup Request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2220, 580]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json;\nreturn [{ json: {\n  subject: `New Pickup Request - ${d['Request ID']}`,\n  body: `A new pickup has been requested:\\n\\nRequest ID: ${d['Request ID']}\\nName: ${d['Name']}\\nPhone: ${d['Phone']}\\nAddress: ${d['Address']}\\nWeight: ${d['Weight']}\\nPickup Date: ${d['Pickup Date']}`\n} }];"
+      },
+      "id": "n54-format-pickup-email",
+      "name": "Format Pickup Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json;\nreturn [{ json: {\n  to: d.from,\n  message: `Your pickup request has been received!\\n\\nRequest ID: ${d['Request ID']}\\nPickup Date: ${d['Pickup Date']}\\n\\nOur rider will contact you before arrival. Thank you.`\n} }];"
+      },
+      "id": "n55-format-pickup-confirm",
+      "name": "Format Pickup Confirmation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 640]
+    },
+
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "FAQs", "mode": "name" },
+        "operation": "getAll",
+        "options": {}
+      },
+      "id": "n60-get-faqs",
+      "name": "Get All FAQs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1780, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "const routed = $('Parse Intent Result').first().json;\nconst text = (routed.originalText || '').toLowerCase();\nconst words = text.split(/\\W+/).filter(w => w.length > 2);\nconst rows = $input.all().map(i => i.json);\n\nlet best = null;\nlet bestScore = 0;\nfor (const r of rows) {\n  const q = (r['Question'] || '').toLowerCase();\n  let score = 0;\n  for (const w of words) { if (q.includes(w)) score++; }\n  if (score > bestScore) { bestScore = score; best = r; }\n}\n\nlet message;\nif (best && bestScore > 0) {\n  message = `${best['Question']}\\n${best['Answer']}`;\n} else {\n  message = \"I couldn't find an exact answer to that. Type 'talk to support' and our team will help you directly.\";\n}\nreturn [{ json: { to: routed.from, message } }];"
+      },
+      "id": "n61-match-faq",
+      "name": "Match FAQ Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 700]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const routed = $json;\nconst ticketId = 'TK' + Date.now().toString().slice(-7);\nreturn [{ json: {\n  'Ticket ID': ticketId,\n  'Phone': routed.from,\n  'Message': routed.originalText,\n  'Status': 'Open',\n  'Created At': new Date().toISOString(),\n  from: routed.from\n} }];"
+      },
+      "id": "n70-gen-ticket",
+      "name": "Generate Ticket ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 860]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Support Tickets", "mode": "name" },
+        "operation": "append",
+        "columns": { "mappingMode": "autoMapInputData", "value": {}, "matchingColumns": [], "schema": [] },
+        "options": {}
+      },
+      "id": "n71-append-ticket",
+      "name": "Save Support Ticket",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2000, 860]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json;\nreturn [{ json: {\n  subject: `Support Request - ${d['Ticket ID']}`,\n  body: `A customer needs human support:\\n\\nTicket ID: ${d['Ticket ID']}\\nPhone: ${d['Phone']}\\nMessage: ${d['Message']}`\n} }];"
+      },
+      "id": "n72-format-ticket-email",
+      "name": "Format Ticket Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 800]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json;\nreturn [{ json: {\n  to: d.from,\n  message: `Thanks for reaching out! Your support ticket ${d['Ticket ID']} has been created. Our team will contact you shortly.`\n} }];"
+      },
+      "id": "n73-format-ticket-confirm",
+      "name": "Format Ticket Confirmation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 920]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { to: $json.from, message: \"Sorry, I didn't understand that. You can ask me to: track a parcel, get shipping cost, find a branch, book a pickup, ask a question, or type 'talk to support'.\" } }];"
+      },
+      "id": "n80-fallback",
+      "name": "Fallback Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 1020]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.WHATSAPP_API_URL || 'https://graph.facebook.com/v20.0') + '/' + $env.WHATSAPP_PHONE_NUMBER_ID + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.WHATSAPP_ACCESS_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.to, type: 'text', text: { body: $json.message } }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "n90-send-whatsapp",
+      "name": "Send WhatsApp Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2680, 400]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.ADMIN_EMAIL }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "n91-notify-admin",
+      "name": "Notify Admin Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2680, 700],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID", "name": "Gmail account" }
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Webhook": { "main": [[ { "node": "Is Verification Request", "type": "main", "index": 0 } ]] },
+    "Is Verification Request": {
+      "main": [
+        [ { "node": "Respond Verification Challenge", "type": "main", "index": 0 } ],
+        [ { "node": "Extract Message Data", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Extract Message Data": { "main": [[ { "node": "Has Valid Message", "type": "main", "index": 0 } ]] },
+    "Has Valid Message": {
+      "main": [
+        [
+          { "node": "Respond OK (Ack)", "type": "main", "index": 0 },
+          { "node": "Build Intent Prompt", "type": "main", "index": 0 }
+        ],
+        [ { "node": "Respond OK (No Message)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Build Intent Prompt": { "main": [[ { "node": "Ollama Intent Classification", "type": "main", "index": 0 } ]] },
+    "Ollama Intent Classification": { "main": [[ { "node": "Parse Intent Result", "type": "main", "index": 0 } ]] },
+    "Parse Intent Result": { "main": [[ { "node": "Route By Intent", "type": "main", "index": 0 } ]] },
+    "Route By Intent": {
+      "main": [
+        [ { "node": "Has Tracking ID", "type": "main", "index": 0 } ],
+        [ { "node": "Check Cost Details", "type": "main", "index": 0 } ],
+        [ { "node": "Get All Branches", "type": "main", "index": 0 } ],
+        [ { "node": "Check Pickup Details Complete", "type": "main", "index": 0 } ],
+        [ { "node": "Get All FAQs", "type": "main", "index": 0 } ],
+        [ { "node": "Generate Ticket ID", "type": "main", "index": 0 } ],
+        [ { "node": "Fallback Message", "type": "main", "index": 0 } ]
+      ]
+    },
+
+    "Has Tracking ID": {
+      "main": [
+        [ { "node": "Get All Shipments", "type": "main", "index": 0 } ],
+        [ { "node": "Ask Tracking ID", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Get All Shipments": { "main": [[ { "node": "Find Shipment", "type": "main", "index": 0 } ]] },
+    "Find Shipment": { "main": [[ { "node": "Format Shipment Reply", "type": "main", "index": 0 } ]] },
+    "Format Shipment Reply": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+    "Ask Tracking ID": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+
+    "Check Cost Details": {
+      "main": [
+        [ { "node": "Get All Shipping Rates", "type": "main", "index": 0 } ],
+        [ { "node": "Ask Cost Details", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Get All Shipping Rates": { "main": [[ { "node": "Format Cost Reply", "type": "main", "index": 0 } ]] },
+    "Format Cost Reply": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+    "Ask Cost Details": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+
+    "Get All Branches": { "main": [[ { "node": "Format Branch Reply", "type": "main", "index": 0 } ]] },
+    "Format Branch Reply": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+
+    "Check Pickup Details Complete": {
+      "main": [
+        [ { "node": "Generate Pickup ID", "type": "main", "index": 0 } ],
+        [ { "node": "Ask Pickup Details", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Generate Pickup ID": { "main": [[ { "node": "Save Pickup Request", "type": "main", "index": 0 } ]] },
+    "Save Pickup Request": {
+      "main": [
+        [
+          { "node": "Format Pickup Email", "type": "main", "index": 0 },
+          { "node": "Format Pickup Confirmation", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Pickup Email": { "main": [[ { "node": "Notify Admin Email", "type": "main", "index": 0 } ]] },
+    "Format Pickup Confirmation": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+    "Ask Pickup Details": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+
+    "Get All FAQs": { "main": [[ { "node": "Match FAQ Answer", "type": "main", "index": 0 } ]] },
+    "Match FAQ Answer": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+
+    "Generate Ticket ID": { "main": [[ { "node": "Save Support Ticket", "type": "main", "index": 0 } ]] },
+    "Save Support Ticket": {
+      "main": [
+        [
+          { "node": "Format Ticket Email", "type": "main", "index": 0 },
+          { "node": "Format Ticket Confirmation", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Ticket Email": { "main": [[ { "node": "Notify Admin Email", "type": "main", "index": 0 } ]] },
+    "Format Ticket Confirmation": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] },
+
+    "Fallback Message": { "main": [[ { "node": "Send WhatsApp Message", "type": "main", "index": 0 } ]] }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" },
+  "meta": { "instanceId": "whatsapp-logistics-bot" }
+}
