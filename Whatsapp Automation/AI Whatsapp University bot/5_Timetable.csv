@@ -1,0 +1,11 @@
+Department,Semester,Day,Time,Course,Room
+CS,5,Monday,9:00 AM,Artificial Intelligence,A-203
+CS,5,Monday,11:00 AM,Database Systems,A-205
+CS,5,Wednesday,9:00 AM,Operating Systems,A-203
+CS,5,Wednesday,2:00 PM,Software Engineering,A-206
+SE,3,Tuesday,10:00 AM,Data Structures,B-101
+SE,3,Thursday,10:00 AM,Discrete Mathematics,B-101
+AI,1,Monday,8:00 AM,Programming Fundamentals,C-301
+AI,1,Wednesday,8:00 AM,Calculus I,C-301
+BBA,2,Tuesday,1:00 PM,Principles of Marketing,D-102
+BBA,2,Thursday,1:00 PM,Financial Accounting,D-102

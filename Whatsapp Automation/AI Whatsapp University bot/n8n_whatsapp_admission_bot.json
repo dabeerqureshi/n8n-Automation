@@ -1,0 +1,1290 @@
+{
+  "name": "FAST-NUCES Islamabad - WhatsApp Admission Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b11dd9f4-c9fc-4485-82f0-eabb06d2b75a",
+      "name": "Webhook - Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -300
+      ],
+      "webhookId": "208f805c-ee39-473f-872c-90ea0b689533"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1913cd8-d247-4593-9ba3-32a568ea5fa4",
+              "name": "verify_token",
+              "value": "REPLACE_WITH_YOUR_VERIFY_TOKEN",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6da2c476-c6fe-4dd5-87e0-4bddcf809e2d",
+      "name": "Config - Verify",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -980,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const query = $input.first().json.query || {};\nconst config = $('Config - Verify').first().json;\nconst mode = query['hub.mode'];\nconst token = query['hub.verify_token'];\nconst challenge = query['hub.challenge'] || '';\nconst isValid = mode === 'subscribe' && token === config.verify_token;\nreturn [{ json: { isValid, challenge } }];\n"
+      },
+      "id": "2b51007b-698e-4794-8ad3-db69b64c8710",
+      "name": "Check Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "d3a423c1-75c0-41e5-b8d2-622a16423faa",
+              "leftValue": "={{$json.isValid}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6e7e1126-8ada-4278-8e74-ccb2c56d037d",
+      "name": "IF Verify Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -540,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{$json.challenge}}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "abdd5770-c498-44cb-a03a-75e86c7eba91",
+      "name": "Respond - Challenge OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -320,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Forbidden",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "1c46e561-36fc-4e94-a15e-9b031c9c8453",
+      "name": "Respond - Verify Forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -320,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "14e78c13-39a9-4e1d-86d8-4b2aaa211c1c",
+      "name": "Webhook - Incoming (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        100
+      ],
+      "webhookId": "7699e3ed-724e-4681-89dd-70b71ef7bedb"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3aabff7c-6755-4662-ae9a-a4c13ae03d11",
+              "name": "whatsapp_token",
+              "value": "REPLACE_WITH_WHATSAPP_CLOUD_API_TOKEN",
+              "type": "string"
+            },
+            {
+              "id": "e911d041-ddc5-451c-a91f-6f1a7c7ea223",
+              "name": "whatsapp_phone_number_id",
+              "value": "REPLACE_WITH_PHONE_NUMBER_ID",
+              "type": "string"
+            },
+            {
+              "id": "82c73bd5-b2b9-4a3e-a3c9-78b673e29474",
+              "name": "whatsapp_api_version",
+              "value": "v20.0",
+              "type": "string"
+            },
+            {
+              "id": "023ff844-495d-43fb-9cc7-f5c06f4e3c40",
+              "name": "ollama_url",
+              "value": "http://localhost:11434",
+              "type": "string"
+            },
+            {
+              "id": "36f388da-3ab1-4366-b14f-de25b5c79fba",
+              "name": "ollama_model",
+              "value": "llama3.1",
+              "type": "string"
+            },
+            {
+              "id": "4feba47c-3d80-474b-8870-fca910a3e6f8",
+              "name": "google_sheet_id",
+              "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+              "type": "string"
+            },
+            {
+              "id": "546de21a-3f96-4e30-abc5-401ac0f71466",
+              "name": "university_name",
+              "value": "FAST-NUCES Islamabad",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dbd0a384-2512-47bc-bbab-da0f3dad18ad",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -980,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const body = $input.first().json.body || {};\nlet hasMessage = false;\nlet from = '';\nlet text = '';\nlet messageId = '';\nlet contactName = '';\ntry {\n  const entry = (body.entry || [])[0];\n  const change = (entry && entry.changes ? entry.changes[0] : {}) || {};\n  const value = change.value || {};\n  const message = (value.messages || [])[0];\n  const contact = (value.contacts || [])[0];\n  if (message && message.type === 'text') {\n    hasMessage = true;\n    from = message.from;\n    text = message.text.body;\n    messageId = message.id;\n    contactName = contact && contact.profile ? contact.profile.name : '';\n  }\n} catch (e) {\n  hasMessage = false;\n}\nreturn [{ json: { hasMessage, from, text, messageId, contactName } }];\n"
+      },
+      "id": "64423e15-3c68-4890-b61a-84e903e0590c",
+      "name": "Extract WhatsApp Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cdbee798-9b98-459c-bb3b-52ae60d0ea33",
+              "leftValue": "={{$json.hasMessage}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "366809a9-7383-4724-a7d3-1ebd378e1d0f",
+      "name": "IF Has Text Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -540,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ignored\" } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "ddc83194-dec4-424e-9547-378a23a181cc",
+      "name": "Respond - Status Ack",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -320,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$('Config').first().json.ollama_url}}/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: $('Config').first().json.ollama_model,\n  prompt: `You are an intent classifier for a university WhatsApp admission bot for FAST-NUCES Islamabad. Classify the student's message into exactly ONE of these intents: general, faq, degree, policy, timetable, scholarship, faculty, calendar, contacts, fallback. Also extract any relevant entities mentioned. Respond ONLY with a valid JSON object, no extra text, no markdown, in this exact shape: {\\\"intent\\\": \\\"<one of the intents above>\\\", \\\"keyword\\\": \\\"<short keyword or empty string>\\\", \\\"degree\\\": \\\"<degree name or empty string>\\\", \\\"department\\\": \\\"<department code or empty string>\\\", \\\"semester\\\": \\\"<semester number or empty string>\\\", \\\"day\\\": \\\"<day of week or empty string>\\\"}. Student message: \\\"{{$json.text}}\\\"`,\n  format: 'json',\n  stream: false\n}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "7e2dafe2-c077-4ce3-adc1-3c5d300ce611",
+      "name": "Ollama - Classify Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        20
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const upstream = $('Extract WhatsApp Message').first().json;\nconst raw = $input.first().json;\nlet intent = 'fallback';\nlet keyword = '', degree = '', department = '', semester = '', day = '';\nconst validIntents = ['general','faq','degree','policy','timetable','scholarship','faculty','calendar','contacts','fallback'];\ntry {\n  const modelText = raw.response || '';\n  const parsed = JSON.parse(modelText);\n  if (validIntents.includes(parsed.intent)) intent = parsed.intent;\n  keyword = parsed.keyword || '';\n  degree = parsed.degree || '';\n  department = parsed.department || '';\n  semester = String(parsed.semester || '');\n  day = parsed.day || '';\n} catch (e) {\n  intent = 'fallback';\n}\nreturn [{ json: {\n  intent, keyword, degree, department, semester, day,\n  from: upstream.from, text: upstream.text, contactName: upstream.contactName\n} }];\n"
+      },
+      "id": "34cc17c3-c054-4fa1-a29b-b90e04b9d4a1",
+      "name": "Parse Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "f506a2e0-b524-4d8d-a348-78971c6459eb",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "general",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "general"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "3ac398b9-fefb-46be-aed7-ea3510e49dad",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "faq",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "faq"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "670d3102-4a0c-42c8-86f2-3999888de648",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "degree",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "degree"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "a08f7061-6cb8-4e23-ab95-a20b5417c371",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "policy",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "policy"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "3e9ab672-d8da-4ab4-9ed1-8eae576563ce",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "timetable",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "timetable"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "85c98144-b02d-44e1-8ea2-832a08f5cc80",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "scholarship",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "scholarship"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "b335f27f-2f8f-427d-bc4c-83da69e3c75d",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "faculty",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "faculty"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "72da03ab-ebda-42bf-a61c-37ad31c4edc2",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "calendar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "calendar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "ad8c2df3-86fd-4ad5-927f-f76e5821d6f7",
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "contacts",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "contacts"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "befb7828-3488-4e5c-ac47-78ba836b6a4f",
+      "name": "Switch - Route Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        120,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "General_Info",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "8d65405d-5c08-4e1e-9c6d-2cf6cecaf1f7",
+      "name": "GSheet - General Info",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        -560
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "FAQs",
+          "mode": "name"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Keyword",
+              "lookupValue": "={{$json.keyword}}"
+            }
+          ]
+        }
+      },
+      "id": "b047ed06-228c-458e-b9c1-31de4714f110",
+      "name": "GSheet - FAQs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        -420
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Degree_Programs",
+          "mode": "name"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Degree",
+              "lookupValue": "={{$json.degree}}"
+            }
+          ]
+        }
+      },
+      "id": "aedcb39f-4a1c-4ae1-a15e-a756c466d706",
+      "name": "GSheet - Degree Programs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        -280
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "University_Policies",
+          "mode": "name"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Policy",
+              "lookupValue": "={{$json.keyword}}"
+            }
+          ]
+        }
+      },
+      "id": "4cf05e9c-e324-42a7-bf04-88fb88cb9b20",
+      "name": "GSheet - Policies",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        -140
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Timetable",
+          "mode": "name"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Department",
+              "lookupValue": "={{$json.department}}"
+            }
+          ]
+        }
+      },
+      "id": "0404703c-7acf-4c18-9f25-772e905c62db",
+      "name": "GSheet - Timetable",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Scholarships",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "d2af9476-2f9b-43cb-ae9e-16f9358a1837",
+      "name": "GSheet - Scholarships",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        140
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Faculty",
+          "mode": "name"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Department",
+              "lookupValue": "={{$json.department}}"
+            }
+          ]
+        }
+      },
+      "id": "63931ae4-209c-4f8c-8400-fe288611ceef",
+      "name": "GSheet - Faculty",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        280
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Academic_Calendar",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "e9e66fcc-f821-4e9c-a672-a9ea39840aa1",
+      "name": "GSheet - Academic Calendar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        420
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Config').first().json.google_sheet_id}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "0e3d0276-9d06-44df-ac6c-4f8c0e63d67a",
+      "name": "GSheet - Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        340,
+        560
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const intentData = $('Parse Intent').first().json;\nconst rows = $input.all().map(i => i.json);\nlet contextText = '';\nif (rows.length === 0) {\n  contextText = 'NO_DATA_FOUND';\n} else {\n  contextText = rows.map(r => Object.entries(r)\n    .filter(([k]) => !k.startsWith('_') && k !== 'row_number')\n    .map(([k, v]) => `${k}: ${v}`).join(' | ')).join('\\n');\n}\nreturn [{ json: {\n  ...intentData,\n  contextText\n} }];\n"
+      },
+      "id": "b236b07f-a1b7-476a-aec4-a492bf3de272",
+      "name": "Build Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$('Config').first().json.ollama_url}}/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: $('Config').first().json.ollama_model,\n  prompt: `You are a friendly, professional admission assistant for FAST-NUCES Islamabad, replying over WhatsApp. Use the data below to answer the student's question in 2-5 short sentences. Be warm and helpful. Do not invent facts that are not in the data. If the data says NO_DATA_FOUND, politely say you could not find that specific information and suggest contacting the Admissions Office at admissions.isb@nu.edu.pk or +92-51-111-128-128. Do not use markdown formatting, just plain text suitable for a WhatsApp message.\\n\\nStudent question: \\\"{{$json.text}}\\\"\\n\\nRelevant data:\\n{{$json.contextText}}`,\n  stream: false\n}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "d94ec206-529a-4d48-bd3c-48003dfc9c2a",
+      "name": "Ollama - Format Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        20
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Build Context').first().json;\nconst raw = $input.first().json;\nlet replyText = (raw && raw.response) ? String(raw.response).trim() : '';\nif (!replyText) {\n  replyText = 'Sorry, I could not process that right now. Please contact the Admissions Office at admissions.isb@nu.edu.pk or +92-51-111-128-128.';\n}\nreturn [{ json: { to: ctx.from, replyText } }];\n"
+      },
+      "id": "e8652fbb-a246-4b26-9732-2f6525e8bbd8",
+      "name": "Parse Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{'https://graph.facebook.com/' + $('Config').first().json.whatsapp_api_version + '/' + $('Config').first().json.whatsapp_phone_number_id + '/messages'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + $('Config').first().json.whatsapp_token}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  messaging_product: 'whatsapp',\n  to: $json.to,\n  type: 'text',\n  text: { body: $json.replyText }\n}) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "eda0e8fb-61c2-4bfa-9915-4c0cf118587b",
+      "name": "Send WhatsApp Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        20
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ok\" } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "0ab99e76-2662-4f39-bed0-ad32190e0e42",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1500,
+        20
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook - Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Config - Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config - Verify": {
+      "main": [
+        [
+          {
+            "node": "Check Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Verify Token": {
+      "main": [
+        [
+          {
+            "node": "IF Verify Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Verify Valid": {
+      "main": [
+        [
+          {
+            "node": "Respond - Challenge OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Verify Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch - Route Intent": {
+      "main": [
+        [
+          {
+            "node": "GSheet - General Info",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GSheet - FAQs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GSheet - Degree Programs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GSheet - Policies",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GSheet - Timetable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GSheet - Scholarships",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GSheet - Faculty",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GSheet - Academic Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GSheet - Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Incoming (POST)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Extract WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "IF Has Text Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Text Message": {
+      "main": [
+        [
+          {
+            "node": "Ollama - Classify Intent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Status Ack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama - Classify Intent": {
+      "main": [
+        [
+          {
+            "node": "Parse Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Intent": {
+      "main": [
+        [
+          {
+            "node": "Switch - Route Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - General Info": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - FAQs": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - Degree Programs": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - Policies": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - Timetable": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - Scholarships": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - Faculty": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - Academic Calendar": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSheet - Contacts": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "Ollama - Format Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama - Format Reply": {
+      "main": [
+        [
+          {
+            "node": "Parse Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Reply": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "versionId": "9152e7b0-d604-4d4d-b4c6-e8733ecaf426",
+  "meta": {
+    "instanceId": "fast-nuces-whatsapp-admission-bot"
+  }
+}

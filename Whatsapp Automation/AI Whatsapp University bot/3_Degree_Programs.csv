@@ -1,0 +1,9 @@
+Degree,Eligibility,MinPercentage,MinCGPA,EntryTest,Duration,TotalCreditHours,SeatsAvailable
+BS Computer Science,FSc Pre-Engineering / ICS / A-Level equivalent,60,-,Yes (NU Test/NTS/SAT),4 Years,133,120
+BS Software Engineering,FSc Pre-Engineering / ICS,60,-,Yes (NU Test/NTS/SAT),4 Years,133,100
+BS Artificial Intelligence,FSc Pre-Engineering / ICS,60,-,Yes (NU Test/NTS/SAT),4 Years,133,60
+BS Data Science,FSc Pre-Engineering / ICS,60,-,Yes (NU Test/NTS/SAT),4 Years,130,50
+BS Electrical Engineering,FSc Pre-Engineering,60,-,Yes (NU Test/NTS/SAT),4 Years,136,90
+BBA,FA / FSc / I.Com,50,-,Yes (NU Test/NTS/SAT),4 Years,127,100
+MS Computer Science,"BS CS or related field, 16 years education",-,2.5,Yes (Subject GAT/NTS),2 Years,30,40
+MBA,"Bachelor degree, 16 years education",-,2.5,Yes (NTS/GAT),"2 Years (2.5 Years for non-business background)",66,60
